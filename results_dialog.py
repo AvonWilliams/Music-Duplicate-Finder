@@ -52,8 +52,8 @@ CONFIDENCE_STYLES = {
     "likely":  ("◑", "#9a6700", "#fff3cd"),
     "unsure":  ("○", "#cf222e", "#f8d7da"),
 }
-LIVE_STYLE = "background:#6f42c1; color:#fff; border-radius:3px; padding:1px 5px; font-size:10px; min-width:46px;"
-BEST_STYLE = "background:#0d6efd; color:#fff; border-radius:3px; padding:1px 5px; font-size:10px; min-width:46px;"
+LIVE_STYLE = "background:#6f42c1; color:#fff; border-radius:3px; padding:2px 6px; font-size:10px; min-width:44px; text-align:center;"
+BEST_STYLE = "background:#0d6efd; color:#fff; border-radius:3px; padding:2px 6px; font-size:10px; min-width:44px; text-align:center;"
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -229,7 +229,7 @@ class FileRow(QWidget):
         badge_col.addStretch()
         badge_w = QWidget()
         badge_w.setLayout(badge_col)
-        badge_w.setFixedWidth(44)
+        badge_w.setFixedWidth(56)
         layout.addWidget(badge_w)
 
         # ── Mini player ────────────────────────────────────────────────────
