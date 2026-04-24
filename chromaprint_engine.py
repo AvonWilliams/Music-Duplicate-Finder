@@ -168,7 +168,8 @@ class ChromaprintEngine:
         alignment: str          = DEFAULT_ALIGNMENT,
         use_gpu: bool           = True,
         gpu_index: int          = 0,
-        query_tile: int         = 64,     # rows per tile when batching
+        query_tile: int         = 64,     # query rows per GPU tile
+        db_tile: int            = 512,    # target rows per GPU tile (limits VRAM)
         progress_cb: "Callable[[str], None] | None" = None,
     ):
         if alignment not in ALIGNMENT_WINDOWS:
@@ -178,6 +179,7 @@ class ChromaprintEngine:
         self._want_gpu = use_gpu
         self._gpu_index = gpu_index
         self._tile = query_tile
+        self._db_tile = db_tile
         self._progress_cb = progress_cb
 
     def _report(self, msg: str) -> None:
@@ -407,62 +409,67 @@ class ChromaprintEngine:
         valid_t = torch.from_numpy(valid).to(device)
 
         sim = torch.zeros((n, n), dtype=torch.float32, device=device)
-        # Pre-fill diagonal with 1.0 (identity)
         sim.fill_diagonal_(1.0)
 
         max_offset = self._max_offset
         offsets = list(range(-max_offset, max_offset + 1))
-        tile = max(1, self._tile)
+        q_tile  = max(1, self._tile)
+        db_tile = max(1, self._db_tile)
 
-        total_tiles = (n + tile - 1) // tile
-        for t_idx, q_start in enumerate(range(0, n, tile)):
+        # Two-level tiling: Q (query) × N (target).
+        # Peak VRAM per offset = Q * db_tile * L * ~25 bytes.
+        # With defaults (64, 512, L≈950): ~780 MB — safe on any modern GPU.
+        total_tiles = (n + q_tile - 1) // q_tile
+        for t_idx, q_start in enumerate(range(0, n, q_tile)):
             if abort_flag and abort_flag():
                 return sim.cpu().numpy()
-            q_end = min(q_start + tile, n)
-            q      = fps_t[q_start:q_end]            # (Q, L) int64
-            qv     = valid_t[q_start:q_end]          # (Q, L) uint8
+            q_end = min(q_start + q_tile, n)
+            q  = fps_t  [q_start:q_end]   # (Q, L) int64
+            qv = valid_t[q_start:q_end]   # (Q, L) uint8
 
-            # Accumulator of best similarity per (query, target)
             best = torch.zeros((q_end - q_start, n), dtype=torch.float32, device=device)
 
-            for offset in offsets:
-                if offset >= 0:
-                    k = offset
-                    q_sub  = q [:, : L - k] if k > 0 else q
-                    qv_sub = qv[:, : L - k] if k > 0 else qv
-                    t_sub  = fps_t  [:,  k:] if k > 0 else fps_t
-                    tv_sub = valid_t[:,  k:] if k > 0 else valid_t
-                else:
-                    k = -offset
-                    q_sub  = q [:,  k:]
-                    qv_sub = qv[:,  k:]
-                    t_sub  = fps_t  [:, : L - k]
-                    tv_sub = valid_t[:, : L - k]
+            for n_start in range(0, n, db_tile):
+                n_end  = min(n_start + db_tile, n)
+                t_db   = fps_t  [n_start:n_end]   # (N_tile, L) int64
+                tv_db  = valid_t[n_start:n_end]   # (N_tile, L) uint8
 
-                # XOR broadcast: (Q, 1, L') ^ (1, N, L') -> (Q, N, L')
-                xor = q_sub.unsqueeze(1) ^ t_sub.unsqueeze(0)
-                # Hamming weight per element
-                pop = self._popcount64(xor)                  # (Q, N, L') int64
-                # Overlap mask: both valid
-                ov  = qv_sub.unsqueeze(1) & tv_sub.unsqueeze(0)   # (Q, N, L') uint8
-                ov_f = ov.to(torch.int64)
+                for offset in offsets:
+                    if offset >= 0:
+                        k = offset
+                        q_sub  = q    [:, :L - k] if k > 0 else q
+                        qv_sub = qv   [:, :L - k] if k > 0 else qv
+                        t_sub  = t_db [:, k:]     if k > 0 else t_db
+                        tv_sub = tv_db[:, k:]     if k > 0 else tv_db
+                    else:
+                        k = -offset
+                        q_sub  = q    [:, k:]
+                        qv_sub = qv   [:, k:]
+                        t_sub  = t_db [:, :L - k]
+                        tv_sub = tv_db[:, :L - k]
 
-                diff_bits = (pop * ov_f).sum(dim=-1)         # (Q, N)
-                total_steps = ov_f.sum(dim=-1)               # (Q, N)
-                total_bits = total_steps * 32
+                    # (Q, 1, L') ^ (1, N_tile, L') -> (Q, N_tile, L')
+                    xor  = q_sub.unsqueeze(1) ^ t_sub.unsqueeze(0)
+                    pop  = self._popcount64(xor)                          # (Q, N_tile, L') int64
+                    ov   = qv_sub.unsqueeze(1) & tv_sub.unsqueeze(0)     # (Q, N_tile, L') uint8
+                    ov_f = ov.to(torch.int64)
 
-                # similarity = 1 - diff_bits / total_bits, guarded for min overlap
-                denom = total_bits.clamp_min(1).to(torch.float32)
-                this_sim = 1.0 - diff_bits.to(torch.float32) / denom
-                # Zero out sims where overlap is too small
-                this_sim = torch.where(
-                    total_steps >= MIN_OVERLAP_STEPS,
-                    this_sim,
-                    torch.zeros_like(this_sim),
-                )
-                best = torch.maximum(best, this_sim)
+                    diff_bits   = (pop * ov_f).sum(dim=-1)               # (Q, N_tile)
+                    total_steps = ov_f.sum(dim=-1)                       # (Q, N_tile)
+                    total_bits  = total_steps * 32
 
-                del xor, pop, ov, ov_f, diff_bits, total_steps, total_bits, this_sim
+                    denom    = total_bits.clamp_min(1).to(torch.float32)
+                    this_sim = 1.0 - diff_bits.to(torch.float32) / denom
+                    this_sim = torch.where(
+                        total_steps >= MIN_OVERLAP_STEPS,
+                        this_sim,
+                        torch.zeros_like(this_sim),
+                    )
+                    best[:, n_start:n_end] = torch.maximum(
+                        best[:, n_start:n_end], this_sim
+                    )
+
+                    del xor, pop, ov, ov_f, diff_bits, total_steps, total_bits, this_sim
 
             sim[q_start:q_end, :] = best
             del best
@@ -472,7 +479,6 @@ class ChromaprintEngine:
                     "Comparing fingerprints… {0}/{1} tiles".format(t_idx + 1, total_tiles)
                 )
 
-        # Symmetrise (pairwise comparisons are symmetric; max handles float roundoff)
         sim = torch.maximum(sim, sim.t())
         return sim.cpu().numpy()
 
