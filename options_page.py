@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QRadioButton,
+    QScrollArea,
     QSlider,
     QSpinBox,
     QStackedWidget,
@@ -595,8 +596,21 @@ class DuplicateFinderOptionsPage(OptionsPage):
 
     def __init__(self):
         super().__init__()
-        root = QVBoxLayout(self)
+
+        # Wrap everything in a scroll area so the page never overflows the
+        # Options dialog on smaller screens.
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+
+        _inner = QWidget()
+        root = QVBoxLayout(_inner)
         root.setSpacing(16)
+
+        scroll.setWidget(_inner)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
 
         # ── Header ────────────────────────────────────────────────────────
         intro = QLabel(
