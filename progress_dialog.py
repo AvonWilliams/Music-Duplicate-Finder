@@ -38,6 +38,7 @@ class ProgressDialog(QDialog):
 
         self.setWindowTitle("Music Duplicate Finder — Scanning…")
         self.setMinimumWidth(440)
+        self.setMinimumHeight(320)
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
         self.setWindowFlags(
             self.windowFlags() & ~Qt.WindowType.WindowCloseButtonHint
