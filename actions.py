@@ -283,6 +283,39 @@ def _start_chromaprint_scan(
 # Tools-menu actions
 # ══════════════════════════════════════════════════════════════════════════
 
+class LoadResultsAction(BaseAction):
+    """Reload a previously saved .mdupe results file without rescanning."""
+    TITLE = "Load Duplicate Results…"
+
+    def callback(self, objs) -> None:
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        from .results_io import load_result
+
+        window = self.api.tagger.window
+        path, _ = QFileDialog.getOpenFileName(
+            window,
+            "Load Duplicate Finder Results",
+            "",
+            "Duplicate results (*.mdupe);;All files (*)",
+        )
+        if not path:
+            return
+        try:
+            result = load_result(path)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(
+                window, "Load Error", f"Could not load results:\n{exc}"
+            )
+            return
+        if not result.groups:
+            QMessageBox.information(
+                window, "No Results", "The file contained no duplicate groups."
+            )
+            return
+        dlg = ResultsDialog(result, window)
+        dlg.exec()
+
+
 class FindDuplicatesAcoustIDAction(BaseAction):
     """Primary duplicate-detection action — chromaprint-based."""
     TITLE = "Find Duplicates (AcoustID)…"
