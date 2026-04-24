@@ -52,8 +52,8 @@ CONFIDENCE_STYLES = {
     "likely":  ("◑", "#9a6700", "#fff3cd"),
     "unsure":  ("○", "#cf222e", "#f8d7da"),
 }
-LIVE_STYLE = "background:#6f42c1; color:#fff; border-radius:3px; padding:1px 5px; font-size:10px;"
-BEST_STYLE = "background:#0d6efd; color:#fff; border-radius:3px; padding:1px 5px; font-size:10px;"
+LIVE_STYLE = "background:#6f42c1; color:#fff; border-radius:3px; padding:1px 5px; font-size:10px; min-width:46px;"
+BEST_STYLE = "background:#0d6efd; color:#fff; border-radius:3px; padding:1px 5px; font-size:10px; min-width:46px;"
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -453,7 +453,7 @@ class GroupCard(QFrame):
         # Title bar — visibly inside the card border
         header = QLabel(title)
         header.setStyleSheet(
-            f"QLabel {{ color: {color}; font-weight: bold; font-size: 12px; "
+            f"QLabel {{ color: #111; font-weight: bold; font-size: 12px; "
             f"background: {color}18; padding: 5px 10px; "
             f"border-bottom: 1px solid {color}30; }}"
         )
