@@ -48,12 +48,13 @@ if TYPE_CHECKING:
 # ── Palette helpers ────────────────────────────────────────────────────────
 
 CONFIDENCE_STYLES = {
-    "certain": ("●", "#1a7f37", "#d4edda"),
-    "likely":  ("◑", "#9a6700", "#fff3cd"),
-    "unsure":  ("○", "#cf222e", "#f8d7da"),
+    #                icon   border/text  card bg    header bg
+    "certain": ("●", "#1a7f37", "#d4edda", "#c3e6cb"),
+    "likely":  ("◑", "#9a6700", "#fff3cd", "#ffeeba"),
+    "unsure":  ("○", "#cf222e", "#f8d7da", "#f5c6cb"),
 }
-LIVE_STYLE = "background:#6f42c1; color:#fff; border-radius:3px; padding:2px 6px; font-size:10px; min-width:44px; text-align:center;"
-BEST_STYLE = "background:#0d6efd; color:#fff; border-radius:3px; padding:2px 6px; font-size:10px; min-width:44px; text-align:center;"
+LIVE_STYLE = "background:#6f42c1; color:#fff; border-radius:3px; padding:2px 6px; font-size:10px; min-width:44px; text-align:left;"
+BEST_STYLE = "background:#0d6efd; color:#fff; border-radius:3px; padding:2px 6px; font-size:10px; min-width:44px; text-align:left;"
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -428,8 +429,8 @@ class GroupCard(QFrame):
         parent=None,
     ):
         super().__init__(parent)
-        icon, color, bg = CONFIDENCE_STYLES.get(
-            group.confidence, ("○", "#555", "#f5f5f5")
+        icon, color, bg, header_bg = CONFIDENCE_STYLES.get(
+            group.confidence, ("○", "#555", "#f5f5f5", "#e8e8e8")
         )
         best = group.best
 
@@ -454,8 +455,8 @@ class GroupCard(QFrame):
         header = QLabel(title)
         header.setStyleSheet(
             f"QLabel {{ color: #111; font-weight: bold; font-size: 12px; "
-            f"background: {color}18; padding: 5px 10px; "
-            f"border-bottom: 1px solid {color}30; }}"
+            f"background: {header_bg}; padding: 5px 10px; "
+            f"border-bottom: 1px solid {color}; }}"
         )
         outer.addWidget(header)
 
