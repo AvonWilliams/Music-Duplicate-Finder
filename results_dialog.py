@@ -243,6 +243,7 @@ class FileRow(QWidget):
 
         filename = os.path.basename(fq.path)
         name_lbl = QLabel(f"<b>{filename}</b>")
+        name_lbl.setStyleSheet("color: #111;")
         name_lbl.setToolTip(fq.path)
         name_lbl.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
@@ -250,7 +251,7 @@ class FileRow(QWidget):
         info_col.addWidget(name_lbl)
 
         path_lbl = QLabel(os.path.dirname(fq.path))
-        path_lbl.setStyleSheet("color: #888; font-size: 10px; font-family: monospace;")
+        path_lbl.setStyleSheet("color: #444; font-size: 10px; font-family: monospace;")
         path_lbl.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
@@ -266,7 +267,7 @@ class FileRow(QWidget):
             meta_parts.append(fq.album)
         if meta_parts:
             meta_lbl = QLabel("  ".join(meta_parts))
-            meta_lbl.setStyleSheet("color: #555; font-size: 11px;")
+            meta_lbl.setStyleSheet("color: #333; font-size: 11px;")
             info_col.addWidget(meta_lbl)
 
         detail_parts = []
@@ -281,7 +282,7 @@ class FileRow(QWidget):
             detail_parts.append(fq.duration_str)
 
         detail_lbl = QLabel("  ·  ".join(detail_parts))
-        detail_lbl.setStyleSheet("color: #777; font-size: 10px;")
+        detail_lbl.setStyleSheet("color: #555; font-size: 10px;")
         info_col.addWidget(detail_lbl)
 
         info_col.addStretch()
@@ -297,7 +298,7 @@ class FileRow(QWidget):
         score_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         q_col.addWidget(score_lbl)
         q_note = QLabel("quality")
-        q_note.setStyleSheet("color: #999; font-size: 9px;")
+        q_note.setStyleSheet("color: #555; font-size: 9px;")
         q_note.setAlignment(Qt.AlignmentFlag.AlignCenter)
         q_col.addWidget(q_note)
         if fq.is_live:
@@ -342,12 +343,12 @@ class FileRow(QWidget):
         btn_col.addStretch()
         layout.addLayout(btn_col)
 
-        # Visual separator at bottom
-        self.setAutoFillBackground(True)
         if is_best:
             pal = self.palette()
-            pal.setColor(QPalette.ColorRole.Window, QColor("#f0fff4"))
+            pal.setColor(QPalette.ColorRole.Window,     QColor("#e8f8ed"))
+            pal.setColor(QPalette.ColorRole.WindowText, QColor("#111111"))
             self.setPalette(pal)
+            self.setAutoFillBackground(True)
 
     # ── Actions ────────────────────────────────────────────────────────────
 
@@ -459,7 +460,6 @@ class GroupCard(QFrame):
         outer.addWidget(header)
 
         body = QWidget()
-        body.setStyleSheet("QWidget { background: transparent; }")
         layout = QVBoxLayout(body)
         layout.setSpacing(2)
         layout.setContentsMargins(6, 6, 6, 6)
