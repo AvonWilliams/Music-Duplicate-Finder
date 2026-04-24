@@ -1,0 +1,39 @@
+uuid = "f7a3c891-2d4e-4b6f-9a1c-8e5d3f7b2c90"
+name = "Music Duplicate Finder V2.0.1"
+description = "Two engines: AcoustID/Chromaprint for true duplicates, CLAP for similar-songs clustering. GPU-accelerated."
+long_description = """
+Two independent detection engines for your Picard library:
+
+1. Find Duplicates (AcoustID)
+   Uses chromaprint audio fingerprints (the same algorithm MusicBrainz
+   itself uses) to find files that are the same master recording —
+   regardless of codec, bitrate, or container. Tolerant of minor
+   encoder/padding differences via user-configurable alignment window
+   (off / narrow / standard / wide / exhaustive). GPU-accelerated via
+   torch+CUDA with CPU fallback.
+
+2. Find Similar Songs (CLAP)
+   Uses CLAP neural audio embeddings to cluster songs by genre, mood,
+   and production. Finds "songs that sound alike" — NOT duplicates.
+   Runs on a remote FastAPI GPU server or on the local machine's GPU.
+
+Both engines share:
+- Three configurable confidence tiers (Certain / Likely / Unsure)
+- Complete-linkage (clique) clustering — every pair in a group is
+  guaranteed above the Unsure threshold
+- Full results browser with per-file quality scoring and per-file
+  actions (play, view tags, move, delete)
+- Full diagnostic logging for reproducibility and threshold tuning
+
+Requirements:
+- AcoustID engine: pyacoustid, numpy, torch (for GPU); fingerprints must
+  be calculated by Picard first via Tools → Scan
+- CLAP engine (local):  torch, transformers, soundfile, scipy; ffmpeg on PATH
+- CLAP engine (remote): FastAPI inference server reachable on the network
+"""
+api = ["3.0"]
+authors = ["Avon"]
+license = "GPL-2.0-or-later"
+license_url = "https://www.gnu.org/licenses/gpl-2.0.html"
+categories = ["util"]
+min_python_version = "3.10"
