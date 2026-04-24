@@ -20,7 +20,6 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFrame,
-    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -38,6 +37,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from .results_io import save_result
 
 if TYPE_CHECKING:
     from .quality import FileQuality
@@ -248,6 +249,14 @@ class FileRow(QWidget):
         )
         info_col.addWidget(name_lbl)
 
+        path_lbl = QLabel(os.path.dirname(fq.path))
+        path_lbl.setStyleSheet("color: #888; font-size: 10px; font-family: monospace;")
+        path_lbl.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        path_lbl.setWordWrap(True)
+        info_col.addWidget(path_lbl)
+
         meta_parts = []
         if fq.title and fq.title != filename:
             meta_parts.append(fq.title)
@@ -406,7 +415,7 @@ class FileRow(QWidget):
 # Group card widget
 # ══════════════════════════════════════════════════════════════════════════
 
-class GroupCard(QGroupBox):
+class GroupCard(QFrame):
     """Displays one duplicate group with all its file rows."""
 
     def __init__(
@@ -417,6 +426,7 @@ class GroupCard(QGroupBox):
         all_players: list,
         parent=None,
     ):
+        super().__init__(parent)
         icon, color, bg = CONFIDENCE_STYLES.get(
             group.confidence, ("○", "#555", "#f5f5f5")
         )
@@ -429,17 +439,30 @@ class GroupCard(QGroupBox):
             if best.artist:
                 title += f"  — {best.artist}"
 
-        super().__init__(title, parent)
+        self.setObjectName("GroupCard")
         self.setStyleSheet(
-            f"QGroupBox {{ background: {bg}; border: 1px solid {color}40; "
-            f"border-radius: 6px; margin-top: 6px; padding-top: 6px; }}"
-            f"QGroupBox::title {{ color: {color}; font-weight: bold; "
-            f"subcontrol-origin: margin; left: 10px; }}"
+            f"QFrame#GroupCard {{ background: {bg}; border: 1px solid {color}50; "
+            f"border-radius: 6px; }}"
         )
 
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setSpacing(0)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        # Title bar — visibly inside the card border
+        header = QLabel(title)
+        header.setStyleSheet(
+            f"QLabel {{ color: {color}; font-weight: bold; font-size: 12px; "
+            f"background: {color}18; padding: 5px 10px; "
+            f"border-bottom: 1px solid {color}30; }}"
+        )
+        outer.addWidget(header)
+
+        body = QWidget()
+        body.setStyleSheet("QWidget { background: transparent; }")
+        layout = QVBoxLayout(body)
         layout.setSpacing(2)
-        layout.setContentsMargins(6, 12, 6, 6)
+        layout.setContentsMargins(6, 6, 6, 6)
 
         for i, fq in enumerate(group.files):
             row = FileRow(fq, is_best=(i == 0), player=player,
@@ -450,6 +473,8 @@ class GroupCard(QGroupBox):
                 line.setFrameShape(QFrame.Shape.HLine)
                 line.setStyleSheet("color: #ddd;")
                 layout.addWidget(line)
+
+        outer.addWidget(body)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -527,9 +552,19 @@ class ResultsDialog(QDialog):
         root.addWidget(scroll, stretch=1)
 
         # ── Bottom bar ─────────────────────────────────────────────────────
+        bottom = QHBoxLayout()
+
+        save_btn = QPushButton("💾  Save Results…")
+        save_btn.setToolTip("Save these results to a file so you can reload them later without rescanning")
+        save_btn.clicked.connect(self._save_results)
+        bottom.addWidget(save_btn)
+        bottom.addStretch()
+
         btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         btns.rejected.connect(self._close)
-        root.addWidget(btns)
+        bottom.addWidget(btns)
+
+        root.addLayout(bottom)
 
     # ── Card building ──────────────────────────────────────────────────────
 
@@ -557,6 +592,27 @@ class ResultsDialog(QDialog):
         # will re-activate itself via playbackStateChanged.
         for mp in self._players:
             mp.deactivate()
+
+    # ── Save ───────────────────────────────────────────────────────────────
+
+    def _save_results(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Duplicate Results",
+            "",
+            "Duplicate results (*.mdupe);;All files (*)",
+        )
+        if not path:
+            return
+        if not path.endswith(".mdupe"):
+            path += ".mdupe"
+        try:
+            save_result(self._result, path)
+            QMessageBox.information(
+                self, "Saved", f"Results saved to:\n{path}"
+            )
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self, "Save Error", f"Could not save results:\n{exc}")
 
     # ── Close ──────────────────────────────────────────────────────────────
 

@@ -16,6 +16,8 @@ from .actions import (
     ClapFilesAction,
     ClapClusterAction,
     ClapAlbumAction,
+    # Saved results
+    LoadResultsAction,
 )
 from .diag import get_logger, log_file_path, set_picard_api
 from .options_page import DuplicateFinderOptionsPage
@@ -25,8 +27,8 @@ def enable(api: PluginApi) -> None:
     """Called by Picard when the plugin is enabled."""
     set_picard_api(api)
     log = get_logger("plugin")
-    log.info("Music Duplicate Finder v2.0.2 loaded  —  diagnostic log: %s", log_file_path())
-    api.logger.info(f"Music Duplicate Finder v2.0.2 loaded — log: {log_file_path()}")
+    log.info("Music Duplicate Finder v2.1.0 loaded  —  diagnostic log: %s", log_file_path())
+    api.logger.info(f"Music Duplicate Finder v2.1.0 loaded — log: {log_file_path()}")
 
     # ── Thresholds (stored as int 0-100) ───────────────────────────────────
     # CLAP thresholds (legacy; kept for compatibility with V1.9 configs)
@@ -68,6 +70,7 @@ def enable(api: PluginApi) -> None:
     # Tools menu: two separate entries, one per engine
     api.register_tools_menu_action(FindDuplicatesAcoustIDAction)
     api.register_tools_menu_action(FindSimilarSongsClapAction)
+    api.register_tools_menu_action(LoadResultsAction)
 
     # Right-click context menus: two entries per container type (files,
     # clusters, albums) — one per engine

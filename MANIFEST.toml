@@ -1,5 +1,5 @@
 uuid = "f7a3c891-2d4e-4b6f-9a1c-8e5d3f7b2c90"
-name = "Music Duplicate Finder v2.0.2"
+name = "Music Duplicate Finder v2.1.0"
 description = "Two engines: AcoustID/Chromaprint for true duplicates, CLAP for similar-songs clustering. GPU-accelerated."
 long_description = """
 Two independent detection engines for your Picard library:
@@ -21,8 +21,10 @@ Both engines share:
 - Three configurable confidence tiers (Certain / Likely / Unsure)
 - Complete-linkage (clique) clustering — every pair in a group is
   guaranteed above the Unsure threshold
-- Full results browser with per-file quality scoring and per-file
-  actions (play, view tags, move, delete)
+- Full results browser with per-file quality scoring, file path display,
+  and per-file actions (play, view tags, move, delete)
+- Save results to a .mdupe file and reload them later without rescanning
+  (Tools → Load Duplicate Results…)
 - Full diagnostic logging for reproducibility and threshold tuning
 
 Requirements:
