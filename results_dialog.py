@@ -295,7 +295,13 @@ class FileRow(QWidget):
         info_col.addWidget(detail_lbl)
 
         info_col.addStretch()
-        layout.addLayout(info_col, stretch=1)
+        
+        # Wrap info column in a widget with max width to prevent row expansion
+        info_w = QWidget()
+        info_w.setLayout(info_col)
+        info_w.setMaximumWidth(420)
+        info_w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        layout.addWidget(info_w, stretch=1)
 
         # ── Quality score ──────────────────────────────────────────────────
         q_col = QVBoxLayout()
