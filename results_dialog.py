@@ -258,7 +258,7 @@ class FileRow(QWidget):
         )
         info_col.addWidget(name_lbl)
 
-        path_lbl = QLabel(os.path.dirname(fq.path))
+        path_lbl = QLabel(self._wrap_path(os.path.dirname(fq.path)))
         path_lbl.setStyleSheet("color: #444; font-size: 10px; font-family: monospace;")
         path_lbl.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
@@ -358,6 +358,10 @@ class FileRow(QWidget):
             pal.setColor(QPalette.ColorRole.WindowText, QColor("#111111"))
             self.setPalette(pal)
             self.setAutoFillBackground(True)
+
+    @staticmethod
+    def _wrap_path(path: str) -> str:
+        return path.replace("/", "/\u200b").replace("\\", "\\\u200b")
 
     # ── Public interface ───────────────────────────────────────────────────
 
