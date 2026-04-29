@@ -11,10 +11,11 @@ import sys
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import Qt, QTimer, QUrl
-from PyQt6.QtGui import QColor, QFont, QPalette
+from PyQt6.QtGui import QColor, QFont, QPainter, QPalette
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -26,7 +27,6 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
     QSlider,
     QSplitter,
     QTableWidget,
@@ -49,12 +49,32 @@ if TYPE_CHECKING:
 
 CONFIDENCE_STYLES = {
     #                icon   border/text  card bg    header bg
-    "certain": ("●", "#1a7f37", "#d4edda", "#c3e6cb"),
-    "likely":  ("◑", "#9a6700", "#fff3cd", "#ffeeba"),
-    "unsure":  ("○", "#cf222e", "#f8d7da", "#f5c6cb"),
+    "certain": ("●", "#1a7f37", "#d4edda", "#85D49C"),
+    "likely":  ("◑", "#eeff00", "#fff3cd", "#f1e750"),
+    "unsure":  ("○", "#cf222e", "#f8d7da", "#ee6d75"),
 }
-LIVE_STYLE = "background:#6f42c1; color:#fff; border-radius:3px; padding:2px 6px; font-size:10px; min-width:44px; text-align:left;"
-BEST_STYLE = "background:#0d6efd; color:#fff; border-radius:3px; padding:2px 6px; font-size:10px; min-width:44px; text-align:left;"
+class _Badge(QWidget):
+    """Pill badge drawn with QPainter — avoids Qt stylesheet border-radius quirks."""
+    def __init__(self, text: str, bg: str, fg: str = "#ffffff", parent=None):
+        super().__init__(parent)
+        self._text = text
+        self._bg   = QColor(bg)
+        self._fg   = QColor(fg)
+        font = QFont()
+        font.setPixelSize(10)
+        self.setFont(font)
+        fm = self.fontMetrics()
+        self.setFixedSize(fm.horizontalAdvance(text) + 14, fm.height() + 6)
+
+    def paintEvent(self, event):  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(self._bg)
+        p.drawRoundedRect(self.rect(), 3, 3)
+        p.setPen(self._fg)
+        p.setFont(self.font())
+        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._text)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -204,6 +224,7 @@ class FileRow(QWidget):
         is_best: bool,
         player: QMediaPlayer,
         all_players: list,   # list of MiniPlayer instances for deactivation
+        on_check_changed=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -214,19 +235,21 @@ class FileRow(QWidget):
         layout.setContentsMargins(6, 4, 6, 4)
         layout.setSpacing(8)
 
+        # ── Checkbox ───────────────────────────────────────────────────────
+        self._checkbox = QCheckBox()
+        self._checkbox.setToolTip("Select for batch action")
+        if on_check_changed:
+            self._checkbox.stateChanged.connect(lambda _: on_check_changed())
+        layout.addWidget(self._checkbox)
+
         # ── Badges ────────────────────────────────────────────────────────
         badge_col = QVBoxLayout()
         badge_col.setSpacing(2)
+        badge_col.setContentsMargins(0, 0, 0, 0)
         if is_best:
-            best_lbl = QLabel("BEST")
-            best_lbl.setStyleSheet(BEST_STYLE)
-            best_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            badge_col.addWidget(best_lbl)
+            badge_col.addWidget(_Badge("BEST", "#0d6efd"), alignment=Qt.AlignmentFlag.AlignLeft)
         if fq.is_live:
-            live_lbl = QLabel("LIVE")
-            live_lbl.setStyleSheet(LIVE_STYLE)
-            live_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            badge_col.addWidget(live_lbl)
+            badge_col.addWidget(_Badge("LIVE", "#6f42c1"), alignment=Qt.AlignmentFlag.AlignLeft)
         badge_col.addStretch()
         badge_w = QWidget()
         badge_w.setLayout(badge_col)
@@ -351,6 +374,14 @@ class FileRow(QWidget):
             self.setPalette(pal)
             self.setAutoFillBackground(True)
 
+    @property
+    def is_checked(self) -> bool:
+        return self._checkbox.isChecked()
+
+    @property
+    def file_path(self) -> str:
+        return self._fq.path
+
     # ── Actions ────────────────────────────────────────────────────────────
 
     def _show_tags(self) -> None:
@@ -426,6 +457,8 @@ class GroupCard(QFrame):
         index: int,
         player: QMediaPlayer,
         all_players: list,
+        file_rows: list,
+        on_check_changed=None,
         parent=None,
     ):
         super().__init__(parent)
@@ -455,8 +488,8 @@ class GroupCard(QFrame):
         header = QLabel(title)
         header.setStyleSheet(
             f"QLabel {{ color: #111; font-weight: bold; font-size: 12px; "
-            f"background: {header_bg}; padding: 5px 10px; "
-            f"border-bottom: 1px solid {color}; }}"
+            f"background: {color}18; padding: 5px 10px; "
+            f"border-bottom: 1px solid {color}30; }}"
         )
         outer.addWidget(header)
 
@@ -467,7 +500,9 @@ class GroupCard(QFrame):
 
         for i, fq in enumerate(group.files):
             row = FileRow(fq, is_best=(i == 0), player=player,
-                          all_players=all_players)
+                          all_players=all_players,
+                          on_check_changed=on_check_changed)
+            file_rows.append(row)
             layout.addWidget(row)
             if i < len(group.files) - 1:
                 line = QFrame()
@@ -489,6 +524,7 @@ class ResultsDialog(QDialog):
         self._result  = result
         self._groups  = result.groups
         self._players: list[MiniPlayer] = []
+        self._file_rows: list[FileRow] = []
 
         self.setWindowTitle("Music Duplicate Finder — Results")
         self.setMinimumSize(820, 640)
@@ -552,6 +588,38 @@ class ResultsDialog(QDialog):
         scroll.setWidget(self._cards_container)
         root.addWidget(scroll, stretch=1)
 
+        # ── Selection action bar ───────────────────────────────────────────
+        sel_bar = QHBoxLayout()
+
+        self._sel_label = QLabel("0 files selected")
+        self._sel_label.setStyleSheet("color: #555; font-size: 11px;")
+        sel_bar.addWidget(self._sel_label)
+        sel_bar.addSpacing(8)
+
+        sel_nonbest_btn = QPushButton("Select Non-Best")
+        sel_nonbest_btn.setToolTip("Check all non-best files in every group")
+        sel_nonbest_btn.clicked.connect(self._select_non_best)
+        sel_bar.addWidget(sel_nonbest_btn)
+
+        clear_sel_btn = QPushButton("Clear Selection")
+        clear_sel_btn.clicked.connect(self._clear_selection)
+        sel_bar.addWidget(clear_sel_btn)
+
+        sel_bar.addStretch()
+
+        self._move_sel_btn = QPushButton("📦  Move Selected…")
+        self._move_sel_btn.setEnabled(False)
+        self._move_sel_btn.clicked.connect(self._move_selected)
+        sel_bar.addWidget(self._move_sel_btn)
+
+        self._del_sel_btn = QPushButton("🗑  Delete Selected")
+        self._del_sel_btn.setEnabled(False)
+        self._del_sel_btn.setStyleSheet("color: #cf222e;")
+        self._del_sel_btn.clicked.connect(self._delete_selected)
+        sel_bar.addWidget(self._del_sel_btn)
+
+        root.addLayout(sel_bar)
+
         # ── Bottom bar ─────────────────────────────────────────────────────
         bottom = QHBoxLayout()
 
@@ -573,8 +641,10 @@ class ResultsDialog(QDialog):
         for i, group in enumerate(self._groups, start=1):
             card = GroupCard(
                 group, i,
-                player     = self._player,
-                all_players = self._players,
+                player           = self._player,
+                all_players      = self._players,
+                file_rows        = self._file_rows,
+                on_check_changed = self._update_selection,
             )
             self._card_widgets.append((group.confidence, card))
             self._cards_layout.addWidget(card)
@@ -593,6 +663,107 @@ class ResultsDialog(QDialog):
         # will re-activate itself via playbackStateChanged.
         for mp in self._players:
             mp.deactivate()
+
+    # ── Selection helpers ──────────────────────────────────────────────────
+
+    def _update_selection(self) -> None:
+        checked = [r for r in self._file_rows if r.isEnabled() and r.is_checked]
+        n = len(checked)
+        self._sel_label.setText(f"{n} file{'s' if n != 1 else ''} selected")
+        self._move_sel_btn.setEnabled(n > 0)
+        self._del_sel_btn.setEnabled(n > 0)
+
+    def _select_non_best(self) -> None:
+        # Best file is always index 0 per group; remaining are non-best.
+        # FileRow order in self._file_rows mirrors insertion order (best first per group).
+        # Track which group each row belongs to via a simple pass.
+        seen_best: set[int] = set()
+        for row in self._file_rows:
+            if not row.isEnabled():
+                continue
+            # First enabled row encountered per group is the best one
+            # We rely on the fact that best rows were inserted first.
+            # Use the group card parent chain to detect group boundary.
+            group_card = row.parent()
+            while group_card and not isinstance(group_card, GroupCard):
+                group_card = group_card.parent()
+            gid = id(group_card)
+            if gid not in seen_best:
+                seen_best.add(gid)
+                row._checkbox.setChecked(False)
+            else:
+                row._checkbox.setChecked(True)
+        self._update_selection()
+
+    def _clear_selection(self) -> None:
+        for row in self._file_rows:
+            row._checkbox.setChecked(False)
+        self._update_selection()
+
+    def _move_selected(self) -> None:
+        checked = [r for r in self._file_rows if r.isEnabled() and r.is_checked]
+        if not checked:
+            return
+        dest_dir = QFileDialog.getExistingDirectory(self, "Move selected files to…")
+        if not dest_dir:
+            return
+        errors: list[str] = []
+        moved = 0
+        for row in checked:
+            src  = row.file_path
+            dest = os.path.join(dest_dir, os.path.basename(src))
+            if os.path.exists(dest):
+                reply = QMessageBox.question(
+                    self, "File exists",
+                    f"'{os.path.basename(src)}' already exists in destination.\nOverwrite?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    continue
+            try:
+                shutil.move(src, dest)
+                row._fq.path = dest
+                row.setEnabled(False)
+                row._checkbox.setChecked(False)
+                moved += 1
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{os.path.basename(src)}: {exc}")
+        msg = f"{moved} file(s) moved to:\n{dest_dir}"
+        if errors:
+            msg += "\n\nErrors:\n" + "\n".join(errors)
+        QMessageBox.information(self, "Move Complete", msg)
+        self._update_selection()
+
+    def _delete_selected(self) -> None:
+        checked = [r for r in self._file_rows if r.isEnabled() and r.is_checked]
+        if not checked:
+            return
+        reply = QMessageBox.warning(
+            self, "Delete files",
+            f"Permanently delete {len(checked)} file(s)?\n\nThis cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        errors: list[str] = []
+        deleted = 0
+        for row in checked:
+            try:
+                os.remove(row.file_path)
+                row.setEnabled(False)
+                row.setStyleSheet("QWidget { color: #aaa; text-decoration: line-through; }")
+                row._checkbox.setChecked(False)
+                for mp in self._players:
+                    mp.deactivate()
+                deleted += 1
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{os.path.basename(row.file_path)}: {exc}")
+        msg = f"{deleted} file(s) deleted."
+        if errors:
+            msg += "\n\nErrors:\n" + "\n".join(errors)
+        QMessageBox.information(self, "Delete Complete", msg)
+        self._update_selection()
 
     # ── Save ───────────────────────────────────────────────────────────────
 
