@@ -15,6 +15,7 @@ from PyQt6.QtGui import QColor, QFont, QPalette
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -209,10 +210,16 @@ class FileRow(QWidget):
         super().__init__(parent)
         self._fq = fq
         self._all_players = all_players
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(6, 4, 6, 4)
         layout.setSpacing(8)
+
+        # ── Checkbox ──────────────────────────────────────────────────────
+        self._checkbox = QCheckBox()
+        self._checkbox.setToolTip("Select for batch move / delete")
+        layout.addWidget(self._checkbox)
 
         # ── Badges ────────────────────────────────────────────────────────
         badge_col = QVBoxLayout()
@@ -257,6 +264,7 @@ class FileRow(QWidget):
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         path_lbl.setWordWrap(True)
+        path_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         info_col.addWidget(path_lbl)
 
         meta_parts = []
@@ -350,6 +358,19 @@ class FileRow(QWidget):
             pal.setColor(QPalette.ColorRole.WindowText, QColor("#111111"))
             self.setPalette(pal)
             self.setAutoFillBackground(True)
+
+    # ── Public interface ───────────────────────────────────────────────────
+
+    def is_checked(self) -> bool:
+        return self._checkbox.isChecked()
+
+    @property
+    def path(self) -> str:
+        return self._fq.path
+
+    @path.setter
+    def path(self, value: str) -> None:
+        self._fq.path = value
 
     # ── Actions ────────────────────────────────────────────────────────────
 
@@ -458,6 +479,8 @@ class GroupCard(QFrame):
             f"background: {header_bg}; padding: 5px 10px; "
             f"border-bottom: 1px solid {color}; }}"
         )
+        header.setWordWrap(True)
+        header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         outer.addWidget(header)
 
         body = QWidget()
@@ -465,9 +488,11 @@ class GroupCard(QFrame):
         layout.setSpacing(2)
         layout.setContentsMargins(6, 6, 6, 6)
 
+        self._file_rows: list[FileRow] = []
         for i, fq in enumerate(group.files):
             row = FileRow(fq, is_best=(i == 0), player=player,
                           all_players=all_players)
+            self._file_rows.append(row)
             layout.addWidget(row)
             if i < len(group.files) - 1:
                 line = QFrame()
@@ -476,6 +501,9 @@ class GroupCard(QFrame):
                 layout.addWidget(line)
 
         outer.addWidget(body)
+
+    def file_rows(self) -> list[FileRow]:
+        return self._file_rows
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -489,6 +517,7 @@ class ResultsDialog(QDialog):
         self._result  = result
         self._groups  = result.groups
         self._players: list[MiniPlayer] = []
+        self._all_file_rows: list[FileRow] = []
 
         self.setWindowTitle("Music Duplicate Finder — Results")
         self.setMinimumSize(820, 640)
@@ -561,6 +590,17 @@ class ResultsDialog(QDialog):
         bottom.addWidget(save_btn)
         bottom.addStretch()
 
+        batch_move_btn = QPushButton("📦 Move Selected")
+        batch_move_btn.setToolTip("Move all checked files to a chosen folder")
+        batch_move_btn.clicked.connect(self._batch_move)
+        bottom.addWidget(batch_move_btn)
+
+        batch_del_btn = QPushButton("🗑 Delete Selected")
+        batch_del_btn.setStyleSheet("color: #cf222e;")
+        batch_del_btn.setToolTip("Permanently delete all checked files")
+        batch_del_btn.clicked.connect(self._batch_delete)
+        bottom.addWidget(batch_del_btn)
+
         btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         btns.rejected.connect(self._close)
         bottom.addWidget(btns)
@@ -577,6 +617,7 @@ class ResultsDialog(QDialog):
                 all_players = self._players,
             )
             self._card_widgets.append((group.confidence, card))
+            self._all_file_rows.extend(card.file_rows())
             self._cards_layout.addWidget(card)
 
     def _apply_filter(self, text: str) -> None:
@@ -593,6 +634,75 @@ class ResultsDialog(QDialog):
         # will re-activate itself via playbackStateChanged.
         for mp in self._players:
             mp.deactivate()
+
+    # ── Batch operations ───────────────────────────────────────────────────
+
+    def _checked_rows(self) -> list[FileRow]:
+        return [r for r in self._all_file_rows if r.is_checked() and r.isEnabled()]
+
+    def _batch_delete(self) -> None:
+        targets = self._checked_rows()
+        if not targets:
+            QMessageBox.information(self, "Nothing selected", "Check at least one file first.")
+            return
+        paths_text = "\n".join(r.path for r in targets)
+        reply = QMessageBox.warning(
+            self,
+            "Delete files",
+            f"Permanently delete {len(targets)} file(s):\n\n{paths_text}\n\nThis cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        errors = []
+        for row in targets:
+            try:
+                os.remove(row.path)
+                row.setEnabled(False)
+                row.setStyleSheet("QWidget { color: #aaa; text-decoration: line-through; }")
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{row.path}: {exc}")
+        for mp in self._players:
+            mp.deactivate()
+        if errors:
+            QMessageBox.critical(self, "Delete errors", "\n".join(errors))
+
+    def _batch_move(self) -> None:
+        targets = self._checked_rows()
+        if not targets:
+            QMessageBox.information(self, "Nothing selected", "Check at least one file first.")
+            return
+        dest_dir = QFileDialog.getExistingDirectory(
+            self, f"Move {len(targets)} file(s) to…", ""
+        )
+        if not dest_dir:
+            return
+        errors = []
+        moved = 0
+        for row in targets:
+            src  = row.path
+            dest = os.path.join(dest_dir, os.path.basename(src))
+            if os.path.exists(dest):
+                reply = QMessageBox.question(
+                    self,
+                    "File exists",
+                    f"'{os.path.basename(src)}' already exists in the destination.\nOverwrite?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    continue
+            try:
+                shutil.move(src, dest)
+                row.path = dest
+                row.setEnabled(False)
+                moved += 1
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{src}: {exc}")
+        if errors:
+            QMessageBox.critical(self, "Move errors", "\n".join(errors))
+        elif moved:
+            QMessageBox.information(self, "Moved", f"{moved} file(s) moved to:\n{dest_dir}")
 
     # ── Save ───────────────────────────────────────────────────────────────
 

@@ -23,6 +23,7 @@ Both engines share:
   guaranteed above the Unsure threshold
 - Full results browser with per-file quality scoring, file path display,
   and per-file actions (play, view tags, move, delete)
+- Checkbox selection for batch move and batch delete across multiple files
 - Save results to a .mdupe file and reload them later without rescanning
   (Tools → Load Duplicate Results…)
 - Full diagnostic logging for reproducibility and threshold tuning
