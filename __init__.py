@@ -27,8 +27,8 @@ def enable(api: PluginApi) -> None:
     """Called by Picard when the plugin is enabled."""
     set_picard_api(api)
     log = get_logger("plugin")
-    log.info("Music Duplicate Finder v2.1.5 loaded  —  diagnostic log: %s", log_file_path())
-    api.logger.info(f"Music Duplicate Finder v2.1.5 loaded — log: {log_file_path()}")
+    log.info("Music Duplicate Finder v2.1.6 loaded  —  diagnostic log: %s", log_file_path())
+    api.logger.info(f"Music Duplicate Finder v2.1.6 loaded — log: {log_file_path()}")
 
     # ── Thresholds (stored as int 0-100) ───────────────────────────────────
     # CLAP thresholds (legacy; kept for compatibility with V1.9 configs)
