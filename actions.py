@@ -6,7 +6,8 @@
 # Both action families share the same scan-launcher plumbing. The engine
 # choice is made by passing a different inference_mode to the ScanWorker.
 
-from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtWidgets import QApplication, QMessageBox, QProgressDialog
 from picard.plugin3.api import BaseAction
 
 from .config_util import cfg_get
@@ -283,13 +284,28 @@ def _start_chromaprint_scan(
 # Tools-menu actions
 # ══════════════════════════════════════════════════════════════════════════
 
+class _LoadThread(QThread):
+    finished = pyqtSignal(object)
+    error    = pyqtSignal(str)
+
+    def __init__(self, path: str, parent=None):
+        super().__init__(parent)
+        self._path = path
+
+    def run(self) -> None:
+        from .results_io import load_result
+        try:
+            self.finished.emit(load_result(self._path))
+        except Exception as exc:  # noqa: BLE001
+            self.error.emit(str(exc))
+
+
 class LoadResultsAction(BaseAction):
     """Reload a previously saved .mdupe results file without rescanning."""
     TITLE = "Load Duplicate Results…"
 
     def callback(self, objs) -> None:
-        from PyQt6.QtWidgets import QFileDialog, QMessageBox
-        from .results_io import load_result
+        from PyQt6.QtWidgets import QFileDialog
 
         window = self.api.tagger.window
         path, _ = QFileDialog.getOpenFileName(
@@ -300,20 +316,39 @@ class LoadResultsAction(BaseAction):
         )
         if not path:
             return
-        try:
-            result = load_result(path)
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(
-                window, "Load Error", f"Could not load results:\n{exc}"
-            )
-            return
-        if not result.groups:
-            QMessageBox.information(
-                window, "No Results", "The file contained no duplicate groups."
-            )
-            return
-        dlg = ResultsDialog(result, window)
-        dlg.exec()
+
+        progress = QProgressDialog("Loading results file…", "", 0, 0, window)
+        progress.setWindowTitle("Music Duplicate Finder")
+        progress.setWindowModality(Qt.WindowModality.ApplicationModal)
+        progress.setMinimumDuration(0)
+        progress.setCancelButton(None)
+        progress.show()
+        QApplication.processEvents()  # force paint before thread starts
+
+        thread = _LoadThread(path, window)
+
+        def on_finished(result) -> None:
+            thread.deleteLater()
+            if not result.groups:
+                progress.close()
+                QMessageBox.information(
+                    window, "No Results", "The file contained no duplicate groups."
+                )
+                return
+            progress.setLabelText(f"Building display for {len(result.groups)} groups…")
+            QApplication.processEvents()
+            dlg = ResultsDialog(result, window, loaded_from_file=True)
+            progress.close()
+            dlg.exec()
+
+        def on_error(msg: str) -> None:
+            progress.close()
+            thread.deleteLater()
+            QMessageBox.critical(window, "Load Error", f"Could not load results:\n{msg}")
+
+        thread.finished.connect(on_finished)
+        thread.error.connect(on_error)
+        thread.start()
 
 
 class FindDuplicatesAcoustIDAction(BaseAction):

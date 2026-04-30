@@ -4,13 +4,16 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 
-_FORMAT_VERSION = 1
+# v1 = plain indented JSON with tags_dict
+# v2 = gzip-compressed compact JSON, tags_dict omitted (re-read from disk on demand)
+_FORMAT_VERSION = 2
 
 
 def save_result(result, path: str) -> None:
-    """Write a ScanResult to a JSON file."""
+    """Write a ScanResult to a gzip-compressed JSON file."""
     data = {
         "version":             _FORMAT_VERSION,
         "mode":                result.mode,
@@ -18,16 +21,20 @@ def save_result(result, path: str) -> None:
         "elapsed_seconds":     result.elapsed_seconds,
         "groups":              [_group_to_dict(g) for g in result.groups],
     }
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(data, fh, indent=2, ensure_ascii=False)
+    with gzip.open(path, "wt", encoding="utf-8") as fh:
+        json.dump(data, fh, ensure_ascii=False)
 
 
 def load_result(path: str):
-    """Read a ScanResult from a JSON file."""
-    from .scan_worker import ScanResult, DuplicateGroup  # noqa: F401 (used below)
+    """Read a ScanResult from a .mdupe file (gzip v2 or plain JSON v1)."""
+    from .scan_worker import ScanResult, DuplicateGroup  # noqa: F401
 
-    with open(path, "r", encoding="utf-8") as fh:
-        data = json.load(fh)
+    try:
+        with gzip.open(path, "rt", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, gzip.BadGzipFile):
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
 
     version = data.get("version", 1)
     if version > _FORMAT_VERSION:
@@ -80,7 +87,6 @@ def _fq_to_dict(fq) -> dict:
         "artist":          fq.artist,
         "album":           fq.album,
         "year":            fq.year,
-        "tags_dict":       fq.tags_dict,
     }
 
 
@@ -100,5 +106,5 @@ def _dict_to_fq(d: dict):
         artist          = d.get("artist",            ""),
         album           = d.get("album",             ""),
         year            = d.get("year",              ""),
-        tags_dict       = d.get("tags_dict",         {}),
+        tags_dict       = {},
     )

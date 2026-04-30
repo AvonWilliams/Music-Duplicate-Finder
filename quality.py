@@ -125,7 +125,11 @@ class FileQuality:
 
         file_size_mb = file_size_bytes / (1024 * 1024)
         self.raw_score = bitrate_kbps * file_size_mb
-        self.score = self.raw_score * (0.5 if is_live else 1.0)
+        # Shorter filename wins for near-identical files (1 point per char).
+        # Meaningful enough to beat minor size/metadata differences, but a
+        # genuine quality gap (different bitrate/format) still dominates.
+        filename_penalty = len(os.path.basename(path)) * 1.0
+        self.score = self.raw_score * (0.5 if is_live else 1.0) - filename_penalty
 
     @property
     def file_size_mb(self) -> float:

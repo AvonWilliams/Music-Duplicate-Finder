@@ -15,6 +15,8 @@ from PyQt6.QtGui import QColor, QFont, QPalette
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -84,7 +86,14 @@ class TagsDialog(QDialog):
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         table.setAlternatingRowColors(True)
 
-        rows = sorted(fq.tags_dict.items())
+        tags = fq.tags_dict
+        if not tags:
+            from .quality import analyse_file
+            reread = analyse_file(fq.path)
+            if reread:
+                tags = reread.tags_dict
+
+        rows = sorted(tags.items())
         table.setRowCount(len(rows))
         for i, (k, v) in enumerate(rows):
             table.setItem(i, 0, QTableWidgetItem(str(k)))
@@ -209,10 +218,31 @@ class FileRow(QWidget):
         super().__init__(parent)
         self._fq = fq
         self._all_players = all_players
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-        layout = QHBoxLayout(self)
+        # Root: optional anomaly banner above the content row
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        self._anomaly_lbl = QLabel()
+        self._anomaly_lbl.setVisible(False)
+        root.addWidget(self._anomaly_lbl)
+
+        self._content = QWidget()
+        layout = QHBoxLayout(self._content)
         layout.setContentsMargins(6, 4, 6, 4)
         layout.setSpacing(8)
+        root.addWidget(self._content)
+
+        # ── Checkbox ──────────────────────────────────────────────────────
+        self._checkbox = QCheckBox()
+        self._checkbox.setToolTip("Select for batch move / delete")
+        self._checkbox.setStyleSheet(
+            "QCheckBox::indicator { width: 20px; height: 20px; }"
+            "QCheckBox { padding: 20px; }"
+        )
+        layout.addWidget(self._checkbox)
 
         # ── Badges ────────────────────────────────────────────────────────
         badge_col = QVBoxLayout()
@@ -238,6 +268,41 @@ class FileRow(QWidget):
         all_players.append(self._mini)
         layout.addWidget(self._mini)
 
+        # ── Action buttons (added before info so they're always visible) ─────
+        btn_col = QVBoxLayout()
+        btn_col.setSpacing(3)
+
+        tags_btn = QPushButton("🏷 Tags")
+        tags_btn.setFixedWidth(72)
+        tags_btn.setToolTip("View all metadata tags")
+        tags_btn.clicked.connect(self._show_tags)
+        btn_col.addWidget(tags_btn)
+
+        folder_btn = QPushButton("📂 Open")
+        folder_btn.setFixedWidth(72)
+        folder_btn.setToolTip("Reveal file in Explorer")
+        folder_btn.clicked.connect(self._open_folder)
+        btn_col.addWidget(folder_btn)
+
+        move_btn = QPushButton("📦 Move")
+        move_btn.setFixedWidth(72)
+        move_btn.setToolTip("Move file to another folder")
+        move_btn.clicked.connect(self._move_file)
+        btn_col.addWidget(move_btn)
+
+        del_btn = QPushButton("🗑 Delete")
+        del_btn.setFixedWidth(72)
+        del_btn.setToolTip("Permanently delete this file")
+        del_btn.setStyleSheet("color: #cf222e;")
+        del_btn.clicked.connect(self._delete_file)
+        btn_col.addWidget(del_btn)
+
+        btn_col.addStretch()
+        btn_w = QWidget()
+        btn_w.setLayout(btn_col)
+        btn_w.setFixedWidth(82)
+        layout.addWidget(btn_w)
+
         # ── File info ──────────────────────────────────────────────────────
         info_col = QVBoxLayout()
         info_col.setSpacing(1)
@@ -251,12 +316,13 @@ class FileRow(QWidget):
         )
         info_col.addWidget(name_lbl)
 
-        path_lbl = QLabel(os.path.dirname(fq.path))
+        path_lbl = QLabel(self._wrap_path(os.path.dirname(fq.path)))
         path_lbl.setStyleSheet("color: #444; font-size: 10px; font-family: monospace;")
         path_lbl.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         path_lbl.setWordWrap(True)
+        path_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         info_col.addWidget(path_lbl)
 
         meta_parts = []
@@ -287,7 +353,12 @@ class FileRow(QWidget):
         info_col.addWidget(detail_lbl)
 
         info_col.addStretch()
-        layout.addLayout(info_col, stretch=1)
+
+        info_w = QWidget()
+        info_w.setLayout(info_col)
+        info_w.setMaximumWidth(620)
+        info_w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        layout.addWidget(info_w, stretch=1)
 
         # ── Quality score ──────────────────────────────────────────────────
         q_col = QVBoxLayout()
@@ -312,44 +383,51 @@ class FileRow(QWidget):
         q_w.setFixedWidth(76)
         layout.addWidget(q_w)
 
-        # ── Action buttons ─────────────────────────────────────────────────
-        btn_col = QVBoxLayout()
-        btn_col.setSpacing(3)
-
-        tags_btn = QPushButton("🏷 Tags")
-        tags_btn.setFixedWidth(72)
-        tags_btn.setToolTip("View all metadata tags")
-        tags_btn.clicked.connect(self._show_tags)
-        btn_col.addWidget(tags_btn)
-
-        folder_btn = QPushButton("📂 Open")
-        folder_btn.setFixedWidth(72)
-        folder_btn.setToolTip("Reveal file in Explorer")
-        folder_btn.clicked.connect(self._open_folder)
-        btn_col.addWidget(folder_btn)
-
-        move_btn = QPushButton("📦 Move")
-        move_btn.setFixedWidth(72)
-        move_btn.setToolTip("Move file to another folder")
-        move_btn.clicked.connect(self._move_file)
-        btn_col.addWidget(move_btn)
-
-        del_btn = QPushButton("🗑 Delete")
-        del_btn.setFixedWidth(72)
-        del_btn.setToolTip("Permanently delete this file")
-        del_btn.setStyleSheet("color: #cf222e;")
-        del_btn.clicked.connect(self._delete_file)
-        btn_col.addWidget(del_btn)
-
-        btn_col.addStretch()
-        layout.addLayout(btn_col)
-
         if is_best:
-            pal = self.palette()
+            pal = self._content.palette()
             pal.setColor(QPalette.ColorRole.Window,     QColor("#e8f8ed"))
             pal.setColor(QPalette.ColorRole.WindowText, QColor("#111111"))
-            self.setPalette(pal)
-            self.setAutoFillBackground(True)
+            self._content.setPalette(pal)
+            self._content.setAutoFillBackground(True)
+
+    @staticmethod
+    def _wrap_path(path: str) -> str:
+        return path.replace("/", "/\u200b").replace("\\", "\\\u200b")
+
+    # ── Public interface ───────────────────────────────────────────────────
+
+    def is_checked(self) -> bool:
+        return self._checkbox.isChecked()
+
+    def set_checked(self, value: bool) -> None:
+        self._checkbox.setChecked(value)
+
+    def mark_missing(self) -> None:
+        self.setEnabled(False)
+        self.setStyleSheet("QWidget { color: #aaa; text-decoration: line-through; }")
+
+    def mark_size_anomaly(self) -> None:
+        self._anomaly_lbl.setText(
+            "⚠  This file is anomalously large compared to the others — "
+            "verify it is correct before deleting the rest"
+        )
+        self._anomaly_lbl.setStyleSheet(
+            "background: #e36209; color: #fff; font-weight: bold; "
+            "font-size: 10px; padding: 3px 10px;"
+        )
+        self._anomaly_lbl.setVisible(True)
+        pal = self._content.palette()
+        pal.setColor(QPalette.ColorRole.Window, QColor("#fff3cd"))
+        self._content.setPalette(pal)
+        self._content.setAutoFillBackground(True)
+
+    @property
+    def path(self) -> str:
+        return self._fq.path
+
+    @path.setter
+    def path(self, value: str) -> None:
+        self._fq.path = value
 
     # ── Actions ────────────────────────────────────────────────────────────
 
@@ -429,6 +507,7 @@ class GroupCard(QFrame):
         parent=None,
     ):
         super().__init__(parent)
+        self._group = group
         icon, color, bg, header_bg = CONFIDENCE_STYLES.get(
             group.confidence, ("○", "#555", "#f5f5f5", "#e8e8e8")
         )
@@ -458,6 +537,8 @@ class GroupCard(QFrame):
             f"background: {header_bg}; padding: 5px 10px; "
             f"border-bottom: 1px solid {color}; }}"
         )
+        header.setWordWrap(True)
+        header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         outer.addWidget(header)
 
         body = QWidget()
@@ -465,9 +546,11 @@ class GroupCard(QFrame):
         layout.setSpacing(2)
         layout.setContentsMargins(6, 6, 6, 6)
 
+        self._file_rows: list[FileRow] = []
         for i, fq in enumerate(group.files):
             row = FileRow(fq, is_best=(i == 0), player=player,
                           all_players=all_players)
+            self._file_rows.append(row)
             layout.addWidget(row)
             if i < len(group.files) - 1:
                 line = QFrame()
@@ -477,6 +560,33 @@ class GroupCard(QFrame):
 
         outer.addWidget(body)
 
+        # Pre-select all losers; leave unchecked and flag winner if anomalous.
+        self._apply_auto_check()
+
+    def file_rows(self) -> list[FileRow]:
+        return self._file_rows
+
+    def apply_auto_check(self) -> None:
+        for row in self._file_rows:
+            row.set_checked(False)
+        self._apply_auto_check()
+
+    def _apply_auto_check(self) -> None:
+        if len(self._file_rows) < 2:
+            return
+        winner_size = self._group.files[0].file_size_bytes
+        other_sizes = [f.file_size_bytes for f in self._group.files[1:]]
+        mean_other  = sum(other_sizes) / len(other_sizes)
+        anomaly = (
+            (mean_other > 0 and winner_size > 1.7 * mean_other)
+            or winner_size > int(7.5 * 1024 * 1024)
+        )
+        if anomaly:
+            self._file_rows[0].mark_size_anomaly()
+        else:
+            for row in self._file_rows[1:]:
+                row.set_checked(True)
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # Main results dialog
@@ -484,11 +594,14 @@ class GroupCard(QFrame):
 
 class ResultsDialog(QDialog):
 
-    def __init__(self, result: "ScanResult", parent=None):
+    def __init__(self, result: "ScanResult", parent=None, *, loaded_from_file: bool = False):
         super().__init__(parent)
+        self.setWindowFlag(Qt.WindowType.Window, True)
         self._result  = result
         self._groups  = result.groups
         self._players: list[MiniPlayer] = []
+        self._all_file_rows: list[FileRow] = []
+        self._loaded_from_file = loaded_from_file
 
         self.setWindowTitle("Music Duplicate Finder — Results")
         self.setMinimumSize(820, 640)
@@ -552,6 +665,9 @@ class ResultsDialog(QDialog):
         scroll.setWidget(self._cards_container)
         root.addWidget(scroll, stretch=1)
 
+        if self._loaded_from_file:
+            QTimer.singleShot(0, self._prompt_check_deletions)
+
         # ── Bottom bar ─────────────────────────────────────────────────────
         bottom = QHBoxLayout()
 
@@ -560,6 +676,27 @@ class ResultsDialog(QDialog):
         save_btn.clicked.connect(self._save_results)
         bottom.addWidget(save_btn)
         bottom.addStretch()
+
+        auto_check_btn = QPushButton("✔ Auto-Check")
+        auto_check_btn.setToolTip("Re-apply automatic pre-selection of losing files")
+        auto_check_btn.clicked.connect(self._auto_check_all)
+        bottom.addWidget(auto_check_btn)
+
+        uncheck_btn = QPushButton("✖ Uncheck All")
+        uncheck_btn.setToolTip("Uncheck all selected files")
+        uncheck_btn.clicked.connect(self._uncheck_all)
+        bottom.addWidget(uncheck_btn)
+
+        batch_move_btn = QPushButton("📦 Move Selected")
+        batch_move_btn.setToolTip("Move all checked files to a chosen folder")
+        batch_move_btn.clicked.connect(self._batch_move)
+        bottom.addWidget(batch_move_btn)
+
+        batch_del_btn = QPushButton("🗑 Delete Selected")
+        batch_del_btn.setStyleSheet("color: #cf222e;")
+        batch_del_btn.setToolTip("Permanently delete all checked files")
+        batch_del_btn.clicked.connect(self._batch_delete)
+        bottom.addWidget(batch_del_btn)
 
         btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         btns.rejected.connect(self._close)
@@ -577,7 +714,36 @@ class ResultsDialog(QDialog):
                 all_players = self._players,
             )
             self._card_widgets.append((group.confidence, card))
+            self._all_file_rows.extend(card.file_rows())
             self._cards_layout.addWidget(card)
+            if i % 10 == 0:
+                QApplication.processEvents()
+
+    def _prompt_check_deletions(self) -> None:
+        reply = QMessageBox.question(
+            self,
+            "Check for deleted files",
+            "Would you like to check whether all files in these results still exist on disk?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        missing = [row for row in self._all_file_rows if not os.path.exists(row.path)]
+        for row in missing:
+            row.mark_missing()
+        if missing:
+            QMessageBox.information(
+                self,
+                "Missing files",
+                f"{len(missing)} file(s) no longer exist on disk and have been marked.",
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "All files present",
+                "All files in these results still exist on disk.",
+            )
 
     def _apply_filter(self, text: str) -> None:
         text = text.lower()
@@ -593,6 +759,85 @@ class ResultsDialog(QDialog):
         # will re-activate itself via playbackStateChanged.
         for mp in self._players:
             mp.deactivate()
+
+    # ── Check helpers ──────────────────────────────────────────────────────
+
+    def _uncheck_all(self) -> None:
+        for row in self._all_file_rows:
+            row.set_checked(False)
+
+    def _auto_check_all(self) -> None:
+        for _, card in self._card_widgets:
+            card.apply_auto_check()
+
+    # ── Batch operations ───────────────────────────────────────────────────
+
+    def _checked_rows(self) -> list[FileRow]:
+        return [r for r in self._all_file_rows if r.is_checked() and r.isEnabled()]
+
+    def _batch_delete(self) -> None:
+        targets = self._checked_rows()
+        if not targets:
+            QMessageBox.information(self, "Nothing selected", "Check at least one file first.")
+            return
+        paths_text = "\n".join(r.path for r in targets)
+        reply = QMessageBox.warning(
+            self,
+            "Delete files",
+            f"Permanently delete {len(targets)} file(s):\n\n{paths_text}\n\nThis cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        errors = []
+        for row in targets:
+            try:
+                os.remove(row.path)
+                row.setEnabled(False)
+                row.setStyleSheet("QWidget { color: #aaa; text-decoration: line-through; }")
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{row.path}: {exc}")
+        for mp in self._players:
+            mp.deactivate()
+        if errors:
+            QMessageBox.critical(self, "Delete errors", "\n".join(errors))
+
+    def _batch_move(self) -> None:
+        targets = self._checked_rows()
+        if not targets:
+            QMessageBox.information(self, "Nothing selected", "Check at least one file first.")
+            return
+        dest_dir = QFileDialog.getExistingDirectory(
+            self, f"Move {len(targets)} file(s) to…", ""
+        )
+        if not dest_dir:
+            return
+        errors = []
+        moved = 0
+        for row in targets:
+            src  = row.path
+            dest = os.path.join(dest_dir, os.path.basename(src))
+            if os.path.exists(dest):
+                reply = QMessageBox.question(
+                    self,
+                    "File exists",
+                    f"'{os.path.basename(src)}' already exists in the destination.\nOverwrite?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    continue
+            try:
+                shutil.move(src, dest)
+                row.path = dest
+                row.setEnabled(False)
+                moved += 1
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{src}: {exc}")
+        if errors:
+            QMessageBox.critical(self, "Move errors", "\n".join(errors))
+        elif moved:
+            QMessageBox.information(self, "Moved", f"{moved} file(s) moved to:\n{dest_dir}")
 
     # ── Save ───────────────────────────────────────────────────────────────
 
