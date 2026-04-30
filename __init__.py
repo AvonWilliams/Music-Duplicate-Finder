@@ -27,8 +27,8 @@ def enable(api: PluginApi) -> None:
     """Called by Picard when the plugin is enabled."""
     set_picard_api(api)
     log = get_logger("plugin")
-    log.info("Music Duplicate Finder v2.1.8 loaded  —  diagnostic log: %s", log_file_path())
-    api.logger.info(f"Music Duplicate Finder v2.1.8 loaded — log: {log_file_path()}")
+    log.info("Music Duplicate Finder v2.1.9 loaded  —  diagnostic log: %s", log_file_path())
+    api.logger.info(f"Music Duplicate Finder v2.1.9 loaded — log: {log_file_path()}")
 
     # ── Thresholds (stored as int 0-100) ───────────────────────────────────
     # CLAP thresholds (legacy; kept for compatibility with V1.9 configs)
@@ -82,6 +82,11 @@ def enable(api: PluginApi) -> None:
 
     api.register_album_action(AcoustIDAlbumAction)
     api.register_album_action(ClapAlbumAction)
+
+    # ── Keyboard shortcut: Ctrl+Shift+D → full AcoustID scan ──────────────
+    from PyQt6.QtGui import QKeySequence, QShortcut
+    _shortcut = QShortcut(QKeySequence("Ctrl+Shift+D"), api.tagger.window)
+    _shortcut.activated.connect(lambda: FindDuplicatesAcoustIDAction().callback([]))
 
 
 def disable() -> None:

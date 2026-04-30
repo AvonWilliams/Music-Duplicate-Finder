@@ -22,9 +22,12 @@ from PyQt6.QtWidgets import (
 class MissingFingerprintsDialog(QDialog):
     """
     Displays counts + optionally a list. Returns:
-      QDialog.Accepted   → user chose "Scan Anyway"
-      QDialog.Rejected   → user chose "Cancel"
+      QDialog.Accepted      → user chose "Scan Anyway"
+      QDialog.Rejected      → user chose "Cancel"
+      GENERATE_FINGERPRINTS → user chose "Generate Fingerprints"
     """
+
+    GENERATE_FINGERPRINTS = 2
 
     def __init__(
         self,
@@ -83,6 +86,14 @@ class MissingFingerprintsDialog(QDialog):
         self._show_btn = QPushButton("Show List of {0} Files".format(missing_count))
         self._show_btn.clicked.connect(self._toggle_list)
         btn_row.addWidget(self._show_btn)
+
+        gen_btn = QPushButton("⚙ Generate Fingerprints for {0} Files".format(missing_count))
+        gen_btn.setToolTip(
+            "Ask Picard to compute AcoustID fingerprints for the files that are missing them. "
+            "Re-run Find Duplicates once it finishes."
+        )
+        gen_btn.clicked.connect(lambda: self.done(self.GENERATE_FINGERPRINTS))
+        btn_row.addWidget(gen_btn)
 
         btn_row.addStretch()
 

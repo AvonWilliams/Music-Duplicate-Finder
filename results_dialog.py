@@ -268,9 +268,24 @@ class FileRow(QWidget):
         all_players.append(self._mini)
         layout.addWidget(self._mini)
 
-        # ── Action buttons (added before info so they're always visible) ─────
+        # ── Quality score + action buttons ────────────────────────────────────
         btn_col = QVBoxLayout()
         btn_col.setSpacing(3)
+
+        score_lbl = QLabel(f"{fq.score:.1f}")
+        score_lbl.setStyleSheet("font-size: 15px; font-weight: bold; color: #333;")
+        score_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        btn_col.addWidget(score_lbl)
+        q_note = QLabel("quality")
+        q_note.setStyleSheet("color: #555; font-size: 9px;")
+        q_note.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        btn_col.addWidget(q_note)
+        if fq.is_live:
+            pen_lbl = QLabel("−50% live")
+            pen_lbl.setStyleSheet("color: #6f42c1; font-size: 9px;")
+            pen_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            btn_col.addWidget(pen_lbl)
+        btn_col.addSpacing(4)
 
         tags_btn = QPushButton("🏷 Tags")
         tags_btn.setFixedWidth(72)
@@ -359,29 +374,6 @@ class FileRow(QWidget):
         info_w.setMaximumWidth(620)
         info_w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         layout.addWidget(info_w, stretch=1)
-
-        # ── Quality score ──────────────────────────────────────────────────
-        q_col = QVBoxLayout()
-        q_col.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        score_lbl = QLabel(f"{fq.score:.1f}")
-        score_lbl.setStyleSheet(
-            "font-size: 15px; font-weight: bold; color: #333;"
-        )
-        score_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        q_col.addWidget(score_lbl)
-        q_note = QLabel("quality")
-        q_note.setStyleSheet("color: #555; font-size: 9px;")
-        q_note.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        q_col.addWidget(q_note)
-        if fq.is_live:
-            pen_lbl = QLabel("−50% live")
-            pen_lbl.setStyleSheet("color: #6f42c1; font-size: 9px;")
-            pen_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            q_col.addWidget(pen_lbl)
-        q_w = QWidget()
-        q_w.setLayout(q_col)
-        q_w.setFixedWidth(76)
-        layout.addWidget(q_w)
 
         if is_best:
             pal = self._content.palette()

@@ -207,7 +207,21 @@ def _start_chromaprint_scan(
             missing_paths  = missing,
             parent         = window,
         )
-        if dlg.exec() != dlg.DialogCode.Accepted:
+        result = dlg.exec()
+        if result == MissingFingerprintsDialog.GENERATE_FINGERPRINTS:
+            tagger = api.tagger
+            file_objs = [tagger.files[p] for p in missing if p in tagger.files]
+            if file_objs:
+                tagger.generate_fingerprints(file_objs)
+                QMessageBox.information(
+                    window,
+                    "Generating Fingerprints",
+                    f"Generating AcoustID fingerprints for {len(file_objs)} file(s) "
+                    f"in the background.\n\nRun Find Duplicates again once Picard "
+                    f"finishes processing them."
+                )
+            return
+        if result != dlg.DialogCode.Accepted:
             return
         if with_fp == 0:
             return
@@ -353,7 +367,7 @@ class LoadResultsAction(BaseAction):
 
 class FindDuplicatesAcoustIDAction(BaseAction):
     """Primary duplicate-detection action — chromaprint-based."""
-    TITLE = "Find Duplicates (AcoustID)…"
+    TITLE = "Find Duplicates (AcoustID)…  [Ctrl+Shift+D]"
 
     def callback(self, objs) -> None:
         _start_chromaprint_scan(
@@ -382,7 +396,7 @@ class FindSimilarSongsClapAction(BaseAction):
 # ══════════════════════════════════════════════════════════════════════════
 
 class AcoustIDFilesAction(BaseAction):
-    TITLE = "Find Duplicates — AcoustID (selected files)"
+    TITLE = "Find Duplicates — AcoustID (selected files)  [Ctrl+Shift+D = full scan]"
 
     def callback(self, objs) -> None:
         paths = _extract_files_from_objs(objs)
@@ -392,7 +406,7 @@ class AcoustIDFilesAction(BaseAction):
 
 
 class AcoustIDClusterAction(BaseAction):
-    TITLE = "Find Duplicates — AcoustID (this cluster)"
+    TITLE = "Find Duplicates — AcoustID (this cluster)  [Ctrl+Shift+D = full scan]"
 
     def callback(self, objs) -> None:
         paths = _extract_files_from_objs(objs)
@@ -406,7 +420,7 @@ class AcoustIDClusterAction(BaseAction):
 
 
 class AcoustIDAlbumAction(BaseAction):
-    TITLE = "Find Duplicates — AcoustID (this album)"
+    TITLE = "Find Duplicates — AcoustID (this album)  [Ctrl+Shift+D = full scan]"
 
     def callback(self, objs) -> None:
         paths = _extract_files_from_objs(objs)
