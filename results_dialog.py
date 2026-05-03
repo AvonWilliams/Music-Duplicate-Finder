@@ -10,7 +10,7 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import Qt, QTimer, QUrl
+from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPalette
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtWidgets import (
@@ -207,6 +207,8 @@ class MiniPlayer(QWidget):
 
 class FileRow(QWidget):
     """A single file entry inside a group card."""
+
+    deleted = pyqtSignal()
 
     def __init__(
         self,
@@ -488,6 +490,7 @@ class FileRow(QWidget):
             # Stop player if this file was playing
             for mp in self._all_players:
                 mp.deactivate()
+            self.deleted.emit()
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "Error", f"Could not delete file:\n{exc}")
 
@@ -682,7 +685,7 @@ class ResultsDialog(QDialog):
         select_btn.setToolTip("Uncheck all, then check files whose path contains the phrase above")
         select_btn.clicked.connect(self._select_by_search)
         search_row.addWidget(select_btn)
-        search_row.addSpacing(16)
+        search_row.addStretch()
         auto_check_btn = QPushButton("✔ Auto-Check")
         auto_check_btn.setToolTip("Re-apply automatic pre-selection of losing files")
         auto_check_btn.clicked.connect(self._auto_check_all)
@@ -691,7 +694,6 @@ class ResultsDialog(QDialog):
         uncheck_btn.setToolTip("Uncheck all selected files")
         uncheck_btn.clicked.connect(self._uncheck_all)
         search_row.addWidget(uncheck_btn)
-        search_row.addStretch()
         root.addLayout(search_row)
 
         # ── Scroll area with group cards ───────────────────────────────────
@@ -732,6 +734,7 @@ class ResultsDialog(QDialog):
         batch_del_btn.setToolTip("Permanently delete all checked files")
         batch_del_btn.clicked.connect(self._batch_delete)
         bottom.addWidget(batch_del_btn)
+        bottom.addStretch()
 
         btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         btns.rejected.connect(self._close)
@@ -749,7 +752,9 @@ class ResultsDialog(QDialog):
                 all_players = self._players,
             )
             self._card_widgets.append((group.confidence, card))
-            self._all_file_rows.extend(card.file_rows())
+            for row in card.file_rows():
+                self._all_file_rows.append(row)
+                row.deleted.connect(lambda: self._apply_filter(self._filter_combo.currentText()))
             self._cards_layout.addWidget(card)
             if i % 10 == 0:
                 QApplication.processEvents()
@@ -872,16 +877,47 @@ class ResultsDialog(QDialog):
         if not targets:
             QMessageBox.information(self, "Nothing selected", "Check at least one file first.")
             return
-        paths_text = "\n".join(r.path for r in targets)
-        reply = QMessageBox.warning(
-            self,
-            "Delete files",
-            f"Permanently delete {len(targets)} file(s):\n\n{paths_text}\n\nThis cannot be undone.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+
+        # ── Confirmation dialog with optional file list ────────────────────
+        confirm = QDialog(self)
+        confirm.setWindowTitle("Delete files")
+        confirm_layout = QVBoxLayout(confirm)
+        confirm_layout.addWidget(QLabel(
+            f"Permanently delete {len(targets)} file(s)?\n\nThis cannot be undone."
+        ))
+        confirm_btns = QHBoxLayout()
+
+        show_btn = QPushButton("Show Files…")
+        def _show_files() -> None:
+            detail = QDialog(confirm)
+            detail.setWindowTitle(f"Files to delete ({len(targets)})")
+            dl = QVBoxLayout(detail)
+            te = QTextEdit()
+            te.setReadOnly(True)
+            te.setPlainText("\n".join(r.path for r in targets))
+            dl.addWidget(te)
+            close_btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+            close_btns.rejected.connect(detail.reject)
+            dl.addWidget(close_btns)
+            detail.resize(640, 360)
+            detail.exec()
+        show_btn.clicked.connect(_show_files)
+        confirm_btns.addWidget(show_btn)
+        confirm_btns.addStretch()
+
+        del_btn = QPushButton("Delete")
+        del_btn.setStyleSheet("color: #cf222e;")
+        del_btn.clicked.connect(confirm.accept)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(confirm.reject)
+        confirm_btns.addWidget(del_btn)
+        confirm_btns.addWidget(cancel_btn)
+        confirm_layout.addLayout(confirm_btns)
+        confirm.resize(380, 110)
+
+        if confirm.exec() != QDialog.DialogCode.Accepted:
             return
+
         errors = []
         for row in targets:
             try:
@@ -892,6 +928,7 @@ class ResultsDialog(QDialog):
                 errors.append(f"{row.path}: {exc}")
         for mp in self._players:
             mp.deactivate()
+        self._apply_filter(self._filter_combo.currentText())
         if errors:
             QMessageBox.critical(self, "Delete errors", "\n".join(errors))
 

@@ -1,5 +1,5 @@
 uuid = "f7a3c891-2d4e-4b6f-9a1c-8e5d3f7b2c90"
-name = "Music Duplicate Finder v2.2.5"
+name = "Music Duplicate Finder v2.2.6"
 description = "Two engines: AcoustID/Chromaprint for true duplicates, CLAP for similar-songs clustering. GPU-accelerated."
 long_description = """
 Two independent detection engines for your Picard library:
