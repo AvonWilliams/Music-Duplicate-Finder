@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QApplication,
     QButtonGroup,
     QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -737,6 +738,62 @@ class DuplicateFinderOptionsPage(OptionsPage):
         diag_layout.addWidget(diag_note)
 
         root.addWidget(diag_box)
+
+        # ── Size Anomaly Detection ────────────────────────────────────────────
+        anomaly_box = QGroupBox("Size Anomaly Detection")
+        anomaly_layout = QVBoxLayout(anomaly_box)
+        anomaly_layout.setSpacing(8)
+
+        anomaly_warn = QLabel(
+            "⚠  These settings affect which duplicate groups are flagged as size "
+            "anomalies and therefore NOT auto-checked for deletion. Only adjust if "
+            "you are confident in what you are doing — incorrect values may cause "
+            "unexpected auto-selection behavior."
+        )
+        anomaly_warn.setWordWrap(True)
+        anomaly_warn.setStyleSheet(
+            "color: #7d4e00; background: #fff8e1; border: 1px solid #f0b429; "
+            "border-radius: 4px; padding: 6px; font-size: 11px;"
+        )
+        anomaly_layout.addWidget(anomaly_warn)
+
+        anomaly_form = QFormLayout()
+        anomaly_form.setSpacing(8)
+
+        self._anomaly_mult_spin = QDoubleSpinBox()
+        self._anomaly_mult_spin.setRange(1.0, 10.0)
+        self._anomaly_mult_spin.setSingleStep(0.1)
+        self._anomaly_mult_spin.setDecimals(1)
+        self._anomaly_mult_spin.setFixedWidth(90)
+        self._anomaly_mult_spin.setToolTip(
+            "Flag a group as anomalous if the best file is this many times larger "
+            "than the mean size of the other files. Default: 1.7"
+        )
+        anomaly_form.addRow("Size multiplier (× mean):", self._anomaly_mult_spin)
+
+        self._anomaly_mb_spin = QDoubleSpinBox()
+        self._anomaly_mb_spin.setRange(0.5, 200.0)
+        self._anomaly_mb_spin.setSingleStep(0.5)
+        self._anomaly_mb_spin.setDecimals(1)
+        self._anomaly_mb_spin.setSuffix(" MB")
+        self._anomaly_mb_spin.setFixedWidth(110)
+        self._anomaly_mb_spin.setToolTip(
+            "Flag a group as anomalous if the best file exceeds this size, "
+            "regardless of the other files. Default: 7.5 MB"
+        )
+        anomaly_form.addRow("Absolute size threshold:", self._anomaly_mb_spin)
+
+        anomaly_layout.addLayout(anomaly_form)
+
+        anomaly_btn_row = QHBoxLayout()
+        self._anomaly_reset_btn = QPushButton("Reset to Defaults")
+        self._anomaly_reset_btn.setFixedWidth(150)
+        self._anomaly_reset_btn.clicked.connect(self._reset_anomaly_defaults)
+        anomaly_btn_row.addWidget(self._anomaly_reset_btn)
+        anomaly_btn_row.addStretch()
+        anomaly_layout.addLayout(anomaly_btn_row)
+
+        root.addWidget(anomaly_box)
         root.addStretch()
 
     # ── OptionsPage interface ──────────────────────────────────────────────
@@ -781,6 +838,10 @@ class DuplicateFinderOptionsPage(OptionsPage):
         self._local_panel.set_gpu_index(cfg_get(cfg, "local_gpu_index", 0))
         self._local_panel.cache_edit.setText(cfg_get(cfg, "model_cache_dir", ""))
 
+        # Size anomaly
+        self._anomaly_mult_spin.setValue(cfg_get(cfg, "anomaly_size_multiplier", 1.7))
+        self._anomaly_mb_spin.setValue(cfg_get(cfg, "anomaly_size_mb", 7.5))
+
     def save(self) -> None:
         cfg = self.api.plugin_config
 
@@ -810,11 +871,19 @@ class DuplicateFinderOptionsPage(OptionsPage):
         cfg["local_gpu_index"] = self._local_panel.selected_gpu_index()
         cfg["model_cache_dir"] = self._local_panel.cache_edit.text().strip()
 
+        # Size anomaly
+        cfg["anomaly_size_multiplier"] = self._anomaly_mult_spin.value()
+        cfg["anomaly_size_mb"]         = self._anomaly_mb_spin.value()
+
     # ── Mode switching ─────────────────────────────────────────────────────
 
     def _on_mode_changed(self, btn_id: int, checked: bool) -> None:
         if checked:
             self._stack.setCurrentIndex(btn_id)
+
+    def _reset_anomaly_defaults(self) -> None:
+        self._anomaly_mult_spin.setValue(1.7)
+        self._anomaly_mb_spin.setValue(7.5)
 
     # ── Diagnostics helpers ────────────────────────────────────────────────
 

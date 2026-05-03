@@ -87,6 +87,9 @@ def _start_clap_scan(
     local_gpu_index    = cfg_get(cfg, "local_gpu_index", 0)
     model_cache_dir    = cfg_get(cfg, "model_cache_dir", "")
 
+    anomaly_multiplier = cfg_get(cfg, "anomaly_size_multiplier", 1.7)
+    anomaly_size_mb    = cfg_get(cfg, "anomaly_size_mb", 7.5)
+
     if restrict_paths is not None and not restrict_paths:
         QMessageBox.information(
             window,
@@ -125,7 +128,15 @@ def _start_clap_scan(
                 "Options → Plugins → Music Duplicate Finder.",
             )
             return
-        dlg = ResultsDialog(result, window)
+        loading = QProgressDialog(f"Building display for {len(result.groups)} groups…", "", 0, 0, window)
+        loading.setWindowTitle("Music Duplicate Finder")
+        loading.setWindowModality(Qt.WindowModality.ApplicationModal)
+        loading.setMinimumDuration(0)
+        loading.setCancelButton(None)
+        loading.show()
+        QApplication.processEvents()
+        dlg = ResultsDialog(result, window, anomaly_multiplier=anomaly_multiplier, anomaly_size_mb=anomaly_size_mb)
+        loading.close()
         dlg.exec()
 
     def on_error(message: str) -> None:
@@ -179,6 +190,9 @@ def _start_chromaprint_scan(
     alignment          = cfg_get(cfg, "cp_alignment",  "standard")
     use_gpu            = bool(cfg_get(cfg, "cp_use_gpu", True))
     local_gpu_index    = cfg_get(cfg, "local_gpu_index", 0)
+
+    anomaly_multiplier = cfg_get(cfg, "anomaly_size_multiplier", 1.7)
+    anomaly_size_mb    = cfg_get(cfg, "anomaly_size_mb", 7.5)
 
     # Harvest fingerprints on the main thread (Picard's File.metadata is
     # not guaranteed thread-safe).
@@ -272,7 +286,15 @@ def _start_chromaprint_scan(
                 )
             )
             return
-        dlg = ResultsDialog(result, window)
+        loading = QProgressDialog(f"Building display for {len(result.groups)} groups…", "", 0, 0, window)
+        loading.setWindowTitle("Music Duplicate Finder")
+        loading.setWindowModality(Qt.WindowModality.ApplicationModal)
+        loading.setMinimumDuration(0)
+        loading.setCancelButton(None)
+        loading.show()
+        QApplication.processEvents()
+        dlg = ResultsDialog(result, window, anomaly_multiplier=anomaly_multiplier, anomaly_size_mb=anomaly_size_mb)
+        loading.close()
         dlg.exec()
 
     def on_error(message: str) -> None:
@@ -351,7 +373,11 @@ class LoadResultsAction(BaseAction):
                 return
             progress.setLabelText(f"Building display for {len(result.groups)} groups…")
             QApplication.processEvents()
-            dlg = ResultsDialog(result, window, loaded_from_file=True)
+            cfg = self.api.plugin_config
+            anomaly_multiplier = cfg_get(cfg, "anomaly_size_multiplier", 1.7)
+            anomaly_size_mb    = cfg_get(cfg, "anomaly_size_mb", 7.5)
+            dlg = ResultsDialog(result, window, loaded_from_file=True,
+                                anomaly_multiplier=anomaly_multiplier, anomaly_size_mb=anomaly_size_mb)
             progress.close()
             dlg.exec()
 

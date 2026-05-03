@@ -509,9 +509,13 @@ class GroupCard(QFrame):
         player: QMediaPlayer,
         all_players: list,
         parent=None,
+        anomaly_multiplier: float = 1.7,
+        anomaly_size_mb: float = 7.5,
     ):
         super().__init__(parent)
         self._group = group
+        self._anomaly_multiplier = anomaly_multiplier
+        self._anomaly_size_mb    = anomaly_size_mb
         icon, color, bg, header_bg = CONFIDENCE_STYLES.get(
             group.confidence, ("○", "#555", "#f5f5f5", "#e8e8e8")
         )
@@ -592,8 +596,8 @@ class GroupCard(QFrame):
         other_sizes = [f.file_size_bytes for f in self._group.files[1:]]
         mean_other  = sum(other_sizes) / len(other_sizes)
         anomaly = (
-            (mean_other > 0 and winner_size > 1.7 * mean_other)
-            or winner_size > int(7.5 * 1024 * 1024)
+            (mean_other > 0 and winner_size > self._anomaly_multiplier * mean_other)
+            or winner_size > int(self._anomaly_size_mb * 1024 * 1024)
         )
         if anomaly:
             self._file_rows[0].mark_size_anomaly()
@@ -610,9 +614,12 @@ class GroupCard(QFrame):
 
 class ResultsDialog(QDialog):
 
-    def __init__(self, result: "ScanResult", parent=None, *, loaded_from_file: bool = False):
+    def __init__(self, result: "ScanResult", parent=None, *, loaded_from_file: bool = False,
+                 anomaly_multiplier: float = 1.7, anomaly_size_mb: float = 7.5):
         super().__init__(parent)
         self.setWindowFlag(Qt.WindowType.Window, True)
+        self._anomaly_multiplier = anomaly_multiplier
+        self._anomaly_size_mb    = anomaly_size_mb
         self._result  = result
         self._groups  = result.groups
         self._players: list[MiniPlayer] = []
@@ -748,8 +755,10 @@ class ResultsDialog(QDialog):
         for i, group in enumerate(self._groups, start=1):
             card = GroupCard(
                 group, i,
-                player     = self._player,
-                all_players = self._players,
+                player             = self._player,
+                all_players        = self._players,
+                anomaly_multiplier = self._anomaly_multiplier,
+                anomaly_size_mb    = self._anomaly_size_mb,
             )
             self._card_widgets.append((group.confidence, card))
             for row in card.file_rows():

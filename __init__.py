@@ -27,8 +27,8 @@ def enable(api: PluginApi) -> None:
     """Called by Picard when the plugin is enabled."""
     set_picard_api(api)
     log = get_logger("plugin")
-    log.info("Music Duplicate Finder v2.2.6 loaded  —  diagnostic log: %s", log_file_path())
-    api.logger.info(f"Music Duplicate Finder v2.2.6 loaded — log: {log_file_path()}")
+    log.info("Music Duplicate Finder v2.2.7 loaded  —  diagnostic log: %s", log_file_path())
+    api.logger.info(f"Music Duplicate Finder v2.2.7 loaded — log: {log_file_path()}")
 
     # ── Thresholds (stored as int 0-100) ───────────────────────────────────
     # CLAP thresholds (legacy; kept for compatibility with V1.9 configs)
@@ -47,7 +47,7 @@ def enable(api: PluginApi) -> None:
     # "remote" = FastAPI server  |  "local" = CLAP on local GPU
     api.plugin_config.register_option("inference_mode", "remote")
 
-    api.plugin_config.register_option("server_host", "10.0.0.69")
+    api.plugin_config.register_option("server_host", "10.0.0.1")
     api.plugin_config.register_option("server_port", 8765)
     api.plugin_config.register_option("api_key", "changeme_homelab_key")
 
@@ -63,6 +63,10 @@ def enable(api: PluginApi) -> None:
     api.plugin_config.register_option("cp_alignment", "standard")
     # GPU acceleration for chromaprint comparison (with CPU fallback warning).
     api.plugin_config.register_option("cp_use_gpu", True)
+
+    # ── Size anomaly detection thresholds ─────────────────────────────────
+    api.plugin_config.register_option("anomaly_size_multiplier", 1.7)
+    api.plugin_config.register_option("anomaly_size_mb", 7.5)
 
     # ── Register UI ────────────────────────────────────────────────────────
     api.register_options_page(DuplicateFinderOptionsPage)
