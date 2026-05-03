@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -227,6 +228,7 @@ class FileRow(QWidget):
 
         self._anomaly_lbl = QLabel()
         self._anomaly_lbl.setVisible(False)
+        self._in_anomalous_group = False
         root.addWidget(self._anomaly_lbl)
 
         self._content = QWidget()
@@ -394,14 +396,21 @@ class FileRow(QWidget):
     def set_checked(self, value: bool) -> None:
         self._checkbox.setChecked(value)
 
+    def is_size_anomaly(self) -> bool:
+        return self._in_anomalous_group
+
+    def flag_anomalous_group(self) -> None:
+        self._in_anomalous_group = True
+
     def mark_missing(self) -> None:
         self.setEnabled(False)
         self.setStyleSheet("QWidget { color: #aaa; text-decoration: line-through; }")
 
     def mark_size_anomaly(self) -> None:
+        self._in_anomalous_group = True
         self._anomaly_lbl.setText(
-            "⚠  This file is anomalously large compared to the others — "
-            "verify it is correct before deleting the rest"
+            "⚠  This group has size anomalies — "
+            "verify before deleting"
         )
         self._anomaly_lbl.setStyleSheet(
             "background: #e36209; color: #fff; font-weight: bold; "
@@ -558,6 +567,16 @@ class GroupCard(QFrame):
     def file_rows(self) -> list[FileRow]:
         return self._file_rows
 
+    def has_active_duplicates(self) -> bool:
+        """True if 2+ file rows are still enabled (not yet deleted/moved)."""
+        return sum(1 for row in self._file_rows if row.isEnabled()) >= 2
+
+    def has_size_anomaly(self) -> bool:
+        return any(row.is_size_anomaly() for row in self._file_rows)
+
+    def has_checked_files(self) -> bool:
+        return any(row.is_checked() for row in self._file_rows)
+
     def apply_auto_check(self) -> None:
         for row in self._file_rows:
             row.set_checked(False)
@@ -575,6 +594,8 @@ class GroupCard(QFrame):
         )
         if anomaly:
             self._file_rows[0].mark_size_anomaly()
+            for row in self._file_rows[1:]:
+                row.flag_anomalous_group()
         else:
             for row in self._file_rows[1:]:
                 row.set_checked(True)
@@ -594,6 +615,7 @@ class ResultsDialog(QDialog):
         self._players: list[MiniPlayer] = []
         self._all_file_rows: list[FileRow] = []
         self._loaded_from_file = loaded_from_file
+        self._hide_resolved = False
 
         self.setWindowTitle("Music Duplicate Finder — Results")
         self.setMinimumSize(820, 640)
@@ -635,11 +657,42 @@ class ResultsDialog(QDialog):
         # Filter combo
         summary_row.addWidget(QLabel("Show:"))
         self._filter_combo = QComboBox()
-        self._filter_combo.addItems(["All", "Certain", "Likely", "Unsure"])
+        self._filter_combo.addItems(["All", "Certain", "Likely", "Unsure", "Size Anomalies", "Search Results"])
         self._filter_combo.currentTextChanged.connect(self._apply_filter)
         summary_row.addWidget(self._filter_combo)
 
+        self._resolved_btn = QPushButton("Hide Resolved Groups")
+        self._resolved_btn.setToolTip(
+            "Hide groups where all duplicates have been deleted or moved"
+        )
+        self._resolved_btn.clicked.connect(self._toggle_resolved_filter)
+        summary_row.addWidget(self._resolved_btn)
+
         root.addLayout(summary_row)
+
+        # ── Path search / select bar ───────────────────────────────────────
+        search_row = QHBoxLayout()
+        search_row.addWidget(QLabel("Select by path:"))
+        self._search_box = QLineEdit()
+        self._search_box.setPlaceholderText("Type a phrase to select matching files…")
+        self._search_box.setMinimumWidth(300)
+        self._search_box.returnPressed.connect(self._select_by_search)
+        search_row.addWidget(self._search_box)
+        select_btn = QPushButton("Select Matching")
+        select_btn.setToolTip("Uncheck all, then check files whose path contains the phrase above")
+        select_btn.clicked.connect(self._select_by_search)
+        search_row.addWidget(select_btn)
+        search_row.addSpacing(16)
+        auto_check_btn = QPushButton("✔ Auto-Check")
+        auto_check_btn.setToolTip("Re-apply automatic pre-selection of losing files")
+        auto_check_btn.clicked.connect(self._auto_check_all)
+        search_row.addWidget(auto_check_btn)
+        uncheck_btn = QPushButton("✖ Uncheck All")
+        uncheck_btn.setToolTip("Uncheck all selected files")
+        uncheck_btn.clicked.connect(self._uncheck_all)
+        search_row.addWidget(uncheck_btn)
+        search_row.addStretch()
+        root.addLayout(search_row)
 
         # ── Scroll area with group cards ───────────────────────────────────
         scroll = QScrollArea()
@@ -668,16 +721,6 @@ class ResultsDialog(QDialog):
         save_btn.clicked.connect(self._save_results)
         bottom.addWidget(save_btn)
         bottom.addStretch()
-
-        auto_check_btn = QPushButton("✔ Auto-Check")
-        auto_check_btn.setToolTip("Re-apply automatic pre-selection of losing files")
-        auto_check_btn.clicked.connect(self._auto_check_all)
-        bottom.addWidget(auto_check_btn)
-
-        uncheck_btn = QPushButton("✖ Uncheck All")
-        uncheck_btn.setToolTip("Uncheck all selected files")
-        uncheck_btn.clicked.connect(self._uncheck_all)
-        bottom.addWidget(uncheck_btn)
 
         batch_move_btn = QPushButton("📦 Move Selected")
         batch_move_btn.setToolTip("Move all checked files to a chosen folder")
@@ -740,8 +783,24 @@ class ResultsDialog(QDialog):
     def _apply_filter(self, text: str) -> None:
         text = text.lower()
         for confidence, card in self._card_widgets:
-            visible = (text == "all" or text == confidence)
+            if text == "all":
+                visible = True
+            elif text == "size anomalies":
+                visible = card.has_size_anomaly()
+            elif text == "search results":
+                visible = card.has_checked_files()
+            else:
+                visible = (text == confidence)
+            if visible and self._hide_resolved:
+                visible = card.has_active_duplicates()
             card.setVisible(visible)
+
+    def _toggle_resolved_filter(self) -> None:
+        self._hide_resolved = not self._hide_resolved
+        self._resolved_btn.setText(
+            "Show Resolved Groups" if self._hide_resolved else "Hide Resolved Groups"
+        )
+        self._apply_filter(self._filter_combo.currentText())
 
     # ── Player helpers ─────────────────────────────────────────────────────
 
@@ -753,6 +812,47 @@ class ResultsDialog(QDialog):
             mp.deactivate()
 
     # ── Check helpers ──────────────────────────────────────────────────────
+
+    def _select_by_search(self) -> None:
+        phrase = self._search_box.text().strip()
+        if not phrase:
+            return
+        phrase_lower = phrase.lower()
+        for row in self._all_file_rows:
+            row.set_checked(False)
+        matched = 0
+        anomaly_skipped = 0
+        for row in self._all_file_rows:
+            if phrase_lower in row.path.lower():
+                if row.is_size_anomaly():
+                    anomaly_skipped += 1
+                else:
+                    row.set_checked(True)
+                    matched += 1
+
+        anomaly_note = (
+            f"\n\n⚠ {anomaly_skipped} matching file(s) were NOT selected — "
+            f"they are flagged as size anomalies and require manual review."
+            if anomaly_skipped else ""
+        )
+        if self._filter_combo.currentText() == "Search Results":
+            self._apply_filter("Search Results")
+
+        if matched == 0 and anomaly_skipped == 0:
+            QMessageBox.information(
+                self, "No matches", f"No files found whose path contains:\n\n{phrase}"
+            )
+        elif matched == 0:
+            QMessageBox.information(
+                self, "No files selected",
+                f"No files selected — all {anomaly_skipped} match(es) are size anomalies "
+                f"and were skipped.{anomaly_note}"
+            )
+        else:
+            QMessageBox.information(
+                self, "Files selected",
+                f"{matched} file(s) selected whose path contains:\n\n{phrase}{anomaly_note}"
+            )
 
     def _uncheck_all(self) -> None:
         for row in self._all_file_rows:
