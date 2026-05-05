@@ -29,7 +29,7 @@ Both engines share:
 
 Requirements:
 - AcoustID engine: pyacoustid, numpy, torch (for GPU); fingerprints must
-  be calculated by Picard first via Tools → Scan
+  be calculated by Picard first via Tools → Scan (unless using the experimental fast fingerprint calculation, available after intiiating an AcousticID scan if fingerprints are not pre-calculated)
 - CLAP engine (local):  torch, transformers, soundfile, scipy; ffmpeg on PATH
 - CLAP engine (remote): FastAPI inference server reachable on the network
 """
