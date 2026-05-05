@@ -16,6 +16,10 @@ from .actions import (
     ClapFilesAction,
     ClapClusterAction,
     ClapAlbumAction,
+    # Fast fingerprint generation
+    GenerateFingerprintsFilesAction,
+    GenerateFingerprintsClusterAction,
+    GenerateFingerprintsAlbumAction,
     # Saved results
     LoadResultsAction,
 )
@@ -27,8 +31,8 @@ def enable(api: PluginApi) -> None:
     """Called by Picard when the plugin is enabled."""
     set_picard_api(api)
     log = get_logger("plugin")
-    log.info("Music Duplicate Finder v2.3.6 loaded  —  diagnostic log: %s", log_file_path())
-    api.logger.info(f"Music Duplicate Finder v2.3.6 loaded — log: {log_file_path()}")
+    log.info("Music Duplicate Finder v2.3.9 loaded  —  diagnostic log: %s", log_file_path())
+    api.logger.info(f"Music Duplicate Finder v2.3.9 loaded — log: {log_file_path()}")
 
     # ── Thresholds (stored as int 0-100) ───────────────────────────────────
     # CLAP thresholds (legacy; kept for compatibility with V1.9 configs)
@@ -68,6 +72,26 @@ def enable(api: PluginApi) -> None:
     api.plugin_config.register_option("anomaly_size_multiplier", 1.7)
     api.plugin_config.register_option("anomaly_size_mb", 7.5)
 
+    # ── CuPy install hint (logged once at load if CUDA is available but CuPy isn't) ──
+    try:
+        import torch
+        if torch.cuda.is_available():
+            try:
+                import cupy  # noqa: F401
+            except ModuleNotFoundError:
+                from .chromaprint_engine import _cupy_install_hint
+                hint = _cupy_install_hint()
+                log.info(
+                    "CuPy not found — AcoustID scan will use the slower PyTorch path. "
+                    "Install CuPy for the fast fused kernel:  %s", hint,
+                )
+                api.logger.info(
+                    f"Music Duplicate Finder: CuPy not found — AcoustID scans will be slower. "
+                    f"Install CuPy to speed them up:  {hint}"
+                )
+    except Exception:  # noqa: BLE001
+        pass
+
     # ── Register UI ────────────────────────────────────────────────────────
     api.register_options_page(DuplicateFinderOptionsPage)
 
@@ -80,12 +104,15 @@ def enable(api: PluginApi) -> None:
     # clusters, albums) — one per engine
     api.register_file_action(AcoustIDFilesAction)
     api.register_file_action(ClapFilesAction)
+    api.register_file_action(GenerateFingerprintsFilesAction)
 
     api.register_cluster_action(AcoustIDClusterAction)
     api.register_cluster_action(ClapClusterAction)
+    api.register_cluster_action(GenerateFingerprintsClusterAction)
 
     api.register_album_action(AcoustIDAlbumAction)
     api.register_album_action(ClapAlbumAction)
+    api.register_album_action(GenerateFingerprintsAlbumAction)
 
     # ── Keyboard shortcut: Ctrl+Shift+D → full AcoustID scan ──────────────
     from PyQt6.QtGui import QKeySequence, QShortcut

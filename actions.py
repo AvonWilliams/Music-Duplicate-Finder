@@ -25,7 +25,7 @@ from .scan_worker import ScanResult, ScanWorker
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Parallel fingerprint generation (experimental)
+# Parallel fingerprint generation
 # ══════════════════════════════════════════════════════════════════════════
 
 class _FingerprintWorker(QThread):
@@ -141,7 +141,7 @@ def _run_parallel_fingerprint(paths: list, tagger, window) -> bool:
     dlg = QProgressDialog(
         "Computing fingerprints…", "Cancel", 0, len(paths), window,
     )
-    dlg.setWindowTitle("Fast Fingerprint — Parallel [experimental]")
+    dlg.setWindowTitle("Fast Fingerprint — Parallel")
     dlg.setWindowModality(Qt.WindowModality.WindowModal)
     dlg.setMinimumDuration(0)
     dlg.setValue(0)
@@ -166,6 +166,11 @@ def _run_parallel_fingerprint(paths: list, tagger, window) -> bool:
         fobj = tagger.files.get(path)
         if fobj is not None:
             fobj.acoustid_fingerprint = fp
+            try:
+                fobj.metadata['acoustid_fingerprint'] = fp
+                fobj.update()
+            except Exception:  # noqa: BLE001
+                pass
             applied += 1
 
     QMessageBox.information(
@@ -215,6 +220,22 @@ def _extract_files_from_objs(objs) -> list[str]:
                 _add_file(f)
 
     return paths
+
+
+def _has_fingerprint(tagger, path: str) -> bool:
+    """Return True if the Picard file object at path already has an acoustid fingerprint."""
+    fobj = tagger.files.get(path)
+    if fobj is None:
+        return False
+    if getattr(fobj, "acoustid_fingerprint", None):
+        return True
+    md = getattr(fobj, "metadata", None)
+    if md is not None:
+        try:
+            return bool(md.get("acoustid_fingerprint") or md["acoustid_fingerprint"])
+        except (KeyError, TypeError):
+            pass
+    return False
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -661,3 +682,52 @@ class ClapAlbumAction(BaseAction):
             else f"the {n_albums} selected albums"
         )
         _start_clap_scan(self.api, self.api.tagger.window, paths, label)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Right-click actions — Generate Missing Fingerprints
+# ══════════════════════════════════════════════════════════════════════════
+
+class GenerateFingerprintsFilesAction(BaseAction):
+    TITLE = "⚡ Generate Missing Fingerprints (selected files)"
+
+    def callback(self, objs) -> None:
+        tagger = self.api.tagger
+        window = tagger.window
+        all_paths = _extract_files_from_objs(objs)
+        missing = [p for p in all_paths if not _has_fingerprint(tagger, p)]
+        if not missing:
+            QMessageBox.information(window, "No Missing Fingerprints",
+                "All selected files already have AcoustID fingerprints.")
+            return
+        _run_parallel_fingerprint(missing, tagger, window)
+
+
+class GenerateFingerprintsClusterAction(BaseAction):
+    TITLE = "⚡ Generate Missing Fingerprints (this cluster)"
+
+    def callback(self, objs) -> None:
+        tagger = self.api.tagger
+        window = tagger.window
+        all_paths = _extract_files_from_objs(objs)
+        missing = [p for p in all_paths if not _has_fingerprint(tagger, p)]
+        if not missing:
+            QMessageBox.information(window, "No Missing Fingerprints",
+                "All files in this cluster already have AcoustID fingerprints.")
+            return
+        _run_parallel_fingerprint(missing, tagger, window)
+
+
+class GenerateFingerprintsAlbumAction(BaseAction):
+    TITLE = "⚡ Generate Missing Fingerprints (this album)"
+
+    def callback(self, objs) -> None:
+        tagger = self.api.tagger
+        window = tagger.window
+        all_paths = _extract_files_from_objs(objs)
+        missing = [p for p in all_paths if not _has_fingerprint(tagger, p)]
+        if not missing:
+            QMessageBox.information(window, "No Missing Fingerprints",
+                "All files in this album already have AcoustID fingerprints.")
+            return
+        _run_parallel_fingerprint(missing, tagger, window)

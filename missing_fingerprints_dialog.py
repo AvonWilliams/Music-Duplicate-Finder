@@ -28,7 +28,7 @@ class MissingFingerprintsDialog(QDialog):
     """
 
     GENERATE_FINGERPRINTS  = 2
-    PARALLEL_GENERATE      = 3   # experimental: parallel fpcalc
+    PARALLEL_GENERATE      = 3
 
     def __init__(
         self,
@@ -96,7 +96,7 @@ class MissingFingerprintsDialog(QDialog):
         gen_btn.clicked.connect(lambda: self.done(self.GENERATE_FINGERPRINTS))
         btn_row.addWidget(gen_btn)
 
-        fast_btn = QPushButton("⚡ Fast Fingerprint — Parallel [experimental]")
+        fast_btn = QPushButton("⚡ Fast Fingerprint — Parallel")
         fast_btn.setToolTip(
             "Compute fingerprints for all {0} missing files in parallel using all CPU cores "
             "(via fpcalc). Much faster than Picard's built-in sequential scan for large "

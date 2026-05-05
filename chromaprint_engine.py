@@ -216,6 +216,19 @@ def _get_cupy_kernel():
     return _cupy_kernel_cache
 
 
+def _cupy_install_hint() -> str:
+    """Return the correct pip install command for CuPy based on the detected CUDA version."""
+    try:
+        import torch
+        cuda_ver = getattr(torch.version, "cuda", None) or ""
+        major = cuda_ver.split(".")[0] if "." in cuda_ver else cuda_ver
+        if major.isdigit():
+            return f"pip install cupy-cuda{major}x"
+    except Exception:  # noqa: BLE001
+        pass
+    return "pip install cupy-cuda12x  (replace '12' with your CUDA major version)"
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # Engine
 # ──────────────────────────────────────────────────────────────────────────
@@ -479,6 +492,12 @@ class ChromaprintEngine:
             import cupy as cp  # noqa: F401
             _get_cupy_kernel()  # compile now so failure is caught here
             return self._compare_cupy(fps, valid, abort_flag)
+        except ModuleNotFoundError:
+            _log.info(
+                "CuPy not installed — AcoustID scan using the slower PyTorch path. "
+                "Speed up with:  %s", _cupy_install_hint(),
+            )
+            return self._compare_torch(fps, valid, abort_flag)
         except Exception as exc:
             _log.info("CuPy kernel unavailable (%s: %s) — using PyTorch loop",
                       type(exc).__name__, exc)
