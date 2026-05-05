@@ -154,6 +154,69 @@ def _popcount32_np(x):
 
 
 # ──────────────────────────────────────────────────────────────────────────
+# CuPy fused CUDA kernel (Option 3 — no intermediate tensor allocations)
+# ──────────────────────────────────────────────────────────────────────────
+#
+# Each GPU thread handles one (query_i, target_j) pair. It loops over every
+# alignment offset in registers, runs __popc on the XOR of the two 32-bit
+# fingerprint ints directly, and writes only the final best-similarity float.
+# No (Q, N, L) XOR tensors are ever materialised in VRAM.
+
+_CUPY_KERNEL_SRC = r"""
+extern "C" __global__
+void chromaprint_sim(
+    const int* __restrict__ fp_q,
+    const int* __restrict__ fp_t,
+    const unsigned char* __restrict__ vq,
+    const unsigned char* __restrict__ vt,
+    float* __restrict__ out,
+    int Q, int N, int L,
+    int max_offset, int min_overlap
+) {
+    int qi = blockIdx.x * blockDim.x + threadIdx.x;
+    int ti = blockIdx.y * blockDim.y + threadIdx.y;
+    if (qi >= Q || ti >= N) return;
+
+    const int*           fq  = fp_q + (ptrdiff_t)qi * L;
+    const int*           ft  = fp_t + (ptrdiff_t)ti * L;
+    const unsigned char* vqi = vq   + (ptrdiff_t)qi * L;
+    const unsigned char* vti = vt   + (ptrdiff_t)ti * L;
+
+    float best = 0.0f;
+    for (int off = -max_offset; off <= max_offset; off++) {
+        int q0  = off < 0 ? -off : 0;
+        int t0  = off > 0 ?  off : 0;
+        int len = L - (off < 0 ? -off : off);
+        if (len <= 0) continue;
+
+        int diff = 0, steps = 0;
+        for (int l = 0; l < len; l++) {
+            if (vqi[q0 + l] & vti[t0 + l]) {
+                diff += __popc((unsigned int)fq[q0 + l] ^ (unsigned int)ft[t0 + l]);
+                steps++;
+            }
+        }
+        if (steps >= min_overlap) {
+            float sim = 1.0f - (float)diff / (float)(steps * 32);
+            if (sim > best) best = sim;
+        }
+    }
+    out[(ptrdiff_t)qi * N + ti] = best;
+}
+"""
+
+_cupy_kernel_cache = None
+
+
+def _get_cupy_kernel():
+    global _cupy_kernel_cache
+    if _cupy_kernel_cache is None:
+        import cupy as cp
+        _cupy_kernel_cache = cp.RawKernel(_CUPY_KERNEL_SRC, "chromaprint_sim")
+    return _cupy_kernel_cache
+
+
+# ──────────────────────────────────────────────────────────────────────────
 # Engine
 # ──────────────────────────────────────────────────────────────────────────
 
@@ -411,14 +474,94 @@ class ChromaprintEngine:
         return f"reserved={res:.0f} MB  allocated={alc:.0f} MB"
 
     def _compare_gpu(self, fps, valid, abort_flag):
+        """Dispatch: CuPy fused kernel first, PyTorch offset-loop fallback."""
+        try:
+            import cupy as cp  # noqa: F401
+            _get_cupy_kernel()  # compile now so failure is caught here
+            return self._compare_cupy(fps, valid, abort_flag)
+        except Exception as exc:
+            _log.info("CuPy kernel unavailable (%s: %s) — using PyTorch loop",
+                      type(exc).__name__, exc)
+            return self._compare_torch(fps, valid, abort_flag)
+
+    def _compare_cupy(self, fps, valid, abort_flag):
+        """
+        Fused CUDA kernel path — one kernel call per (Q_tile × N_tile) pair.
+        Each thread handles one (qi, ti) pair and loops over all offsets
+        internally: no (Q, N, L) intermediate tensors are ever allocated.
+        """
+        import numpy as np
+        import torch
+        import cupy as cp
+
+        device = torch.device("cuda:{0}".format(self._gpu_index))
+        n, L   = fps.shape
+
+        _log.info("[VRAM-DIAG] _compare_cupy entry  n=%d L=%d  %s", n, L, self._vram_mb(device))
+
+        # int32 is sufficient — chromaprint values are uint32, bit patterns identical,
+        # and the kernel uses (unsigned int) casts for XOR/popcount. Halves VRAM vs int64.
+        with cp.cuda.Device(self._gpu_index):
+            fps_cp   = cp.asarray(fps.view(np.int32))   # (n, L) int32  on GPU
+            valid_cp = cp.asarray(valid)                  # (n, L) uint8  on GPU
+
+        sim = torch.zeros((n, n), dtype=torch.float32, device=device)
+        sim.fill_diagonal_(1.0)
+
+        _log.info(
+            "[VRAM-DIAG] after uploads  fps=%.0f MB  valid=%.0f MB  sim=%.0f MB  %s",
+            fps_cp.nbytes / 1024**2, valid_cp.nbytes / 1024**2,
+            sim.nbytes / 1024**2, self._vram_mb(device),
+        )
+
+        q_tile  = max(1, self._tile)
+        db_tile = max(1, self._db_tile)
+        kernel  = _get_cupy_kernel()
+        BLOCK   = 16   # 16×16 = 256 threads per block
+
+        total_tiles = (n + q_tile - 1) // q_tile
+        for t_idx, q_start in enumerate(range(0, n, q_tile)):
+            if abort_flag and abort_flag():
+                return sim.cpu().numpy()
+            q_end  = min(q_start + q_tile, n)
+            Q      = q_end - q_start
+            fp_q_cp = fps_cp  [q_start:q_end]   # (Q, L)
+            vq_cp   = valid_cp[q_start:q_end]   # (Q, L)
+
+            for n_start in range(0, n, db_tile):
+                n_end   = min(n_start + db_tile, n)
+                N       = n_end - n_start
+                fp_t_cp = fps_cp  [n_start:n_end]   # (N, L)
+                vt_cp   = valid_cp[n_start:n_end]   # (N, L)
+                out_cp  = cp.empty((Q, N), dtype=cp.float32)
+
+                grid = ((Q + BLOCK - 1) // BLOCK, (N + BLOCK - 1) // BLOCK)
+                kernel(
+                    grid, (BLOCK, BLOCK),
+                    (fp_q_cp, fp_t_cp, vq_cp, vt_cp, out_cp,
+                     np.int32(Q), np.int32(N), np.int32(L),
+                     np.int32(self._max_offset), np.int32(MIN_OVERLAP_STEPS)),
+                )
+
+                sim[q_start:q_end, n_start:n_end] = torch.from_dlpack(out_cp)
+
+            if (t_idx + 1) % max(1, total_tiles // 20) == 0:
+                self._report(
+                    "Comparing fingerprints… {0}/{1} tiles".format(t_idx + 1, total_tiles)
+                )
+
+        sim = torch.maximum(sim, sim.t())
+        return sim.cpu().numpy()
+
+    def _compare_torch(self, fps, valid, abort_flag):
+        """PyTorch fallback — original offset for-loop."""
         import numpy as np
         import torch
 
         device = torch.device("cuda:{0}".format(self._gpu_index))
         n, L = fps.shape
 
-        # VRAM DIAG: baseline before we touch the GPU
-        _log.info("[VRAM-DIAG] _compare_gpu entry  n=%d L=%d  %s",
+        _log.info("[VRAM-DIAG] _compare_torch entry  n=%d L=%d  %s",
                   n, L, self._vram_mb(device))
 
         fps_t   = torch.from_numpy(fps.astype(np.int64, copy=False)).to(device)
@@ -436,9 +579,6 @@ class ChromaprintEngine:
         q_tile  = max(1, self._tile)
         db_tile = max(1, self._db_tile)
 
-        # Two-level tiling: Q (query) × N (target).
-        # Peak VRAM per offset = Q * db_tile * L * ~25 bytes.
-        # With defaults (64, 512, L≈950): ~780 MB — safe on any modern GPU.
         total_tiles = (n + q_tile - 1) // q_tile
         for t_idx, q_start in enumerate(range(0, n, q_tile)):
             if abort_flag and abort_flag():
@@ -451,8 +591,8 @@ class ChromaprintEngine:
 
             for n_start in range(0, n, db_tile):
                 n_end  = min(n_start + db_tile, n)
-                t_db   = fps_t  [n_start:n_end]   # (N_tile, L) int64
-                tv_db  = valid_t[n_start:n_end]   # (N_tile, L) uint8
+                t_db   = fps_t  [n_start:n_end]
+                tv_db  = valid_t[n_start:n_end]
 
                 for offset in offsets:
                     if offset >= 0:
@@ -468,21 +608,19 @@ class ChromaprintEngine:
                         t_sub  = t_db [:, :L - k]
                         tv_sub = tv_db[:, :L - k]
 
-                    # VRAM DIAG: log once on the very first offset of the first tile
                     if t_idx == 0 and n_start == 0 and offset == offsets[0]:
                         _log.info(
                             "[VRAM-DIAG] before xor  q_sub=%s t_sub=%s  %s",
                             tuple(q_sub.shape), tuple(t_sub.shape), self._vram_mb(device),
                         )
 
-                    # (Q, 1, L') ^ (1, N_tile, L') -> (Q, N_tile, L')
                     xor  = q_sub.unsqueeze(1) ^ t_sub.unsqueeze(0)
-                    pop  = self._popcount64(xor)                          # (Q, N_tile, L') int64
-                    ov   = qv_sub.unsqueeze(1) & tv_sub.unsqueeze(0)     # (Q, N_tile, L') uint8
+                    pop  = self._popcount64(xor)
+                    ov   = qv_sub.unsqueeze(1) & tv_sub.unsqueeze(0)
                     ov_f = ov.to(torch.int64)
 
-                    diff_bits   = (pop * ov_f).sum(dim=-1)               # (Q, N_tile)
-                    total_steps = ov_f.sum(dim=-1)                       # (Q, N_tile)
+                    diff_bits   = (pop * ov_f).sum(dim=-1)
+                    total_steps = ov_f.sum(dim=-1)
                     total_bits  = total_steps * 32
 
                     denom    = total_bits.clamp_min(1).to(torch.float32)
@@ -496,7 +634,6 @@ class ChromaprintEngine:
                         best[:, n_start:n_end], this_sim
                     )
 
-                    # VRAM DIAG: log peak within this offset (after all temps are live)
                     if t_idx == 0 and n_start == 0 and offset == offsets[0]:
                         _log.info("[VRAM-DIAG] peak within offset  %s", self._vram_mb(device))
 
