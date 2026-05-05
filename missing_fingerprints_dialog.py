@@ -27,7 +27,8 @@ class MissingFingerprintsDialog(QDialog):
       GENERATE_FINGERPRINTS → user chose "Generate Fingerprints"
     """
 
-    GENERATE_FINGERPRINTS = 2
+    GENERATE_FINGERPRINTS  = 2
+    PARALLEL_GENERATE      = 3   # experimental: parallel fpcalc
 
     def __init__(
         self,
@@ -94,6 +95,18 @@ class MissingFingerprintsDialog(QDialog):
         )
         gen_btn.clicked.connect(lambda: self.done(self.GENERATE_FINGERPRINTS))
         btn_row.addWidget(gen_btn)
+
+        fast_btn = QPushButton("⚡ Fast Fingerprint — Parallel [experimental]")
+        fast_btn.setToolTip(
+            "Compute fingerprints for all {0} missing files in parallel using all CPU cores "
+            "(via fpcalc). Much faster than Picard's built-in sequential scan for large "
+            "libraries. Does not perform an AcoustID lookup — only computes the local "
+            "fingerprint needed for duplicate detection. Re-run Find Duplicates once done."
+            .format(missing_count)
+        )
+        fast_btn.setStyleSheet("color: #007700; font-weight: bold;")
+        fast_btn.clicked.connect(lambda: self.done(self.PARALLEL_GENERATE))
+        btn_row.addWidget(fast_btn)
 
         btn_row.addStretch()
 

@@ -10,7 +10,10 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import QApplication, QMessageBox, QProgressDialog
 from picard.plugin3.api import BaseAction
 
+from .diag import get_logger
 from .config_util import cfg_get
+
+_log = get_logger("actions")
 from .file_collector import collect_files_with_fingerprints
 from .missing_fingerprints_dialog import (
     CpuFallbackWarningDialog,
@@ -19,6 +22,159 @@ from .missing_fingerprints_dialog import (
 from .progress_dialog import ProgressDialog
 from .results_dialog import ResultsDialog
 from .scan_worker import ScanResult, ScanWorker
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Parallel fingerprint generation (experimental)
+# ══════════════════════════════════════════════════════════════════════════
+
+class _FingerprintWorker(QThread):
+    progress = pyqtSignal(int, int)   # completed, total
+    done_sig = pyqtSignal()           # fires when finished (no data — read self.results)
+
+    def __init__(self, paths: list, fpcalc_bin: str):
+        super().__init__()
+        self._paths  = paths
+        self._fpcalc = fpcalc_bin
+        self._abort  = False
+        self.results: dict = {}       # read this after worker.wait()
+
+    def abort(self) -> None:
+        self._abort = True
+
+    def run(self) -> None:
+        import json
+        import os
+        import subprocess
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        total = len(self._paths)
+        done  = 0
+
+        _log.info("[fpcalc-worker] starting: %d files, fpcalc=%s, workers=%s",
+                  total, self._fpcalc, os.cpu_count())
+        if self._paths:
+            _log.info("[fpcalc-worker] first path sample: %r", self._paths[0])
+
+        def _run_one(path):
+            try:
+                out = subprocess.run(
+                    [self._fpcalc, "-json", path],
+                    capture_output=True, text=True, timeout=120,
+                )
+                if out.returncode == 0:
+                    data = json.loads(out.stdout)
+                    fp = data.get("fingerprint")
+                    if not fp:
+                        _log.warning("[fpcalc-worker] no fingerprint key for %r: %s",
+                                     path, out.stdout[:200])
+                    return path, fp
+                _log.warning("[fpcalc-worker] rc=%d for %r  stderr=%r",
+                             out.returncode, path, out.stderr[:300])
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("[fpcalc-worker] exception for %r: %s", path, exc)
+            return path, None
+
+        workers = max(1, os.cpu_count() or 4)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            fts = {pool.submit(_run_one, p): p for p in self._paths}
+            for ft in as_completed(fts):
+                if self._abort:
+                    break
+                path, fp = ft.result()
+                done += 1
+                if fp:
+                    self.results[path] = fp
+                self.progress.emit(done, total)
+
+        _log.info("[fpcalc-worker] done: %d/%d succeeded", len(self.results), total)
+        self.done_sig.emit()
+
+
+def _run_parallel_fingerprint(paths: list, tagger, window) -> bool:
+    """
+    Run fpcalc in parallel across all CPU cores for the given paths.
+    Stores results directly onto Picard file objects as acoustid_fingerprint.
+    Returns True if at least one fingerprint was computed.
+    """
+    import os
+    import shutil
+
+    def _find_fpcalc():
+        # 1. Try Picard's own configured path
+        try:
+            from picard import config as picard_config
+            p = getattr(picard_config.setting, "acoustid_fpcalc", None) or ""
+            _log.info("[fpcalc-find] picard config acoustid_fpcalc=%r  isfile=%s  executable=%s",
+                      p, os.path.isfile(p) if p else "n/a", os.access(p, os.X_OK) if p else "n/a")
+            if p and os.path.isfile(p) and os.access(p, os.X_OK):
+                return p
+        except Exception as exc:  # noqa: BLE001
+            _log.info("[fpcalc-find] picard config lookup failed: %s", exc)
+        # 2. PATH lookup
+        _log.info("[fpcalc-find] PATH=%s", os.environ.get("PATH", "<unset>"))
+        found = shutil.which("fpcalc")
+        _log.info("[fpcalc-find] shutil.which('fpcalc')=%r", found)
+        if found:
+            return found
+        # 3. Common hardcoded locations
+        for candidate in ("/usr/bin/fpcalc", "/usr/local/bin/fpcalc"):
+            exists = os.path.isfile(candidate)
+            executable = os.access(candidate, os.X_OK) if exists else False
+            _log.info("[fpcalc-find] candidate %s  isfile=%s  executable=%s",
+                      candidate, exists, executable)
+            if exists and executable:
+                return candidate
+        return None
+
+    fpcalc = _find_fpcalc()
+    if not fpcalc:
+        QMessageBox.critical(
+            window,
+            "fpcalc Not Found",
+            "Could not find fpcalc.\n\n"
+            "Install it with:\n  sudo apt install libchromaprint-tools\n\n"
+            "Or use the '⚙ Generate Fingerprints' button to let Picard handle it.",
+        )
+        return False
+
+    dlg = QProgressDialog(
+        "Computing fingerprints…", "Cancel", 0, len(paths), window,
+    )
+    dlg.setWindowTitle("Fast Fingerprint — Parallel [experimental]")
+    dlg.setWindowModality(Qt.WindowModality.WindowModal)
+    dlg.setMinimumDuration(0)
+    dlg.setValue(0)
+
+    worker = _FingerprintWorker(paths, fpcalc)
+    worker.progress.connect(lambda done, _total: dlg.setValue(done))
+    worker.done_sig.connect(dlg.accept)
+    dlg.canceled.connect(worker.abort)
+    worker.start()
+    dlg.exec()
+    worker.wait()  # guaranteed: thread is done, worker.results is fully populated
+
+    if not worker.results:
+        QMessageBox.warning(
+            window, "No Fingerprints Generated",
+            "No fingerprints could be computed. Check that fpcalc is working.",
+        )
+        return False
+
+    applied = 0
+    for path, fp in worker.results.items():
+        fobj = tagger.files.get(path)
+        if fobj is not None:
+            fobj.acoustid_fingerprint = fp
+            applied += 1
+
+    QMessageBox.information(
+        window,
+        "Fingerprints Ready",
+        f"Computed fingerprints for {applied} of {len(paths)} files.\n\n"
+        f"Run Find Duplicates again to include these files in the scan.",
+    )
+    return applied > 0
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -235,6 +391,9 @@ def _start_chromaprint_scan(
                     f"in the background.\n\nRun Find Duplicates again once Picard "
                     f"finishes processing them."
                 )
+            return
+        if result == MissingFingerprintsDialog.PARALLEL_GENERATE:
+            _run_parallel_fingerprint(missing, api.tagger, window)
             return
         if result != dlg.DialogCode.Accepted:
             return
