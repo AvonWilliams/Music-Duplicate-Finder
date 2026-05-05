@@ -56,18 +56,23 @@ def load_result(path: str):
 
 def _group_to_dict(group) -> dict:
     return {
-        "confidence": group.confidence,
-        "similarity": group.similarity,
-        "files":      [_fq_to_dict(fq) for fq in group.files],
+        "confidence":     group.confidence,
+        "similarity":     group.similarity,
+        "min_similarity": group.min_similarity,
+        "max_similarity": group.max_similarity,
+        "files":          [_fq_to_dict(fq) for fq in group.files],
     }
 
 
 def _dict_to_group(d: dict):
     from .scan_worker import DuplicateGroup
 
+    sim = d["similarity"]
     group = DuplicateGroup(
-        confidence = d["confidence"],
-        similarity = d["similarity"],
+        confidence     = d["confidence"],
+        similarity     = sim,
+        min_similarity = d.get("min_similarity", sim),
+        max_similarity = d.get("max_similarity", sim),
     )
     group.files = [_dict_to_fq(f) for f in d.get("files", [])]
     return group
@@ -87,13 +92,14 @@ def _fq_to_dict(fq) -> dict:
         "artist":          fq.artist,
         "album":           fq.album,
         "year":            fq.year,
+        "fingerprint":     fq.fingerprint,
     }
 
 
 def _dict_to_fq(d: dict):
     from .quality import FileQuality
 
-    return FileQuality(
+    fq = FileQuality(
         path            = d.get("path",            ""),
         bitrate_kbps    = d.get("bitrate_kbps",    0.0),
         file_size_bytes = d.get("file_size_bytes",  0),
@@ -108,3 +114,5 @@ def _dict_to_fq(d: dict):
         year            = d.get("year",              ""),
         tags_dict       = {},
     )
+    fq.fingerprint = d.get("fingerprint", "")
+    return fq

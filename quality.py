@@ -91,6 +91,7 @@ class FileQuality:
         "sample_rate_hz", "channels", "duration_sec",
         "is_live", "raw_score", "score",
         "title", "artist", "album", "year", "tags_dict",
+        "fingerprint",
     )
 
     def __init__(
@@ -122,6 +123,7 @@ class FileQuality:
         self.album          = album
         self.year           = year
         self.tags_dict      = tags_dict  # raw {key: str_value} for tags viewer
+        self.fingerprint    = ""         # compressed chromaprint string; set by scan_worker
 
         file_size_mb = file_size_bytes / (1024 * 1024)
         self.raw_score = bitrate_kbps * file_size_mb

@@ -37,7 +37,7 @@ class ProgressDialog(QDialog):
         self._on_error   = on_error
 
         self.setWindowTitle("Music Duplicate Finder — Scanning…")
-        self.setMinimumWidth(440)
+        self.setMinimumWidth(530)
         self.setMinimumHeight(320)
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
         self.setWindowFlags(

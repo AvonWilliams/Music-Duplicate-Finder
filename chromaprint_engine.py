@@ -286,6 +286,10 @@ class ChromaprintEngine:
         t_compare0 = time.time()
         if use_gpu:
             sim = self._compare_gpu(fps, valid, abort_flag)
+            import torch
+            torch.cuda.empty_cache()
+            _log.info("[VRAM-DIAG] after chromaprint GPU + empty_cache: %s",
+                      self._vram_mb(torch.device("cuda:{0}".format(self._gpu_index))))
         else:
             sim = self._compare_cpu(fps, valid, abort_flag)
 
@@ -398,6 +402,14 @@ class ChromaprintEngine:
 
     # ── GPU path ──────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _vram_mb(device) -> str:
+        """Return a one-line VRAM summary for the log."""
+        import torch
+        res = torch.cuda.memory_reserved(device)  / 1024**2
+        alc = torch.cuda.memory_allocated(device) / 1024**2
+        return f"reserved={res:.0f} MB  allocated={alc:.0f} MB"
+
     def _compare_gpu(self, fps, valid, abort_flag):
         import numpy as np
         import torch
@@ -405,11 +417,19 @@ class ChromaprintEngine:
         device = torch.device("cuda:{0}".format(self._gpu_index))
         n, L = fps.shape
 
+        # VRAM DIAG: baseline before we touch the GPU
+        _log.info("[VRAM-DIAG] _compare_gpu entry  n=%d L=%d  %s",
+                  n, L, self._vram_mb(device))
+
         fps_t   = torch.from_numpy(fps.astype(np.int64, copy=False)).to(device)
         valid_t = torch.from_numpy(valid).to(device)
+        _log.info("[VRAM-DIAG] after fps_t+valid_t  (fps_t=%.0f MB  valid_t=%.0f MB)  %s",
+                  fps_t.nbytes / 1024**2, valid_t.nbytes / 1024**2, self._vram_mb(device))
 
         sim = torch.zeros((n, n), dtype=torch.float32, device=device)
         sim.fill_diagonal_(1.0)
+        _log.info("[VRAM-DIAG] after sim alloc  (sim=%.0f MB)  %s",
+                  sim.nbytes / 1024**2, self._vram_mb(device))
 
         max_offset = self._max_offset
         offsets = list(range(-max_offset, max_offset + 1))
@@ -448,6 +468,13 @@ class ChromaprintEngine:
                         t_sub  = t_db [:, :L - k]
                         tv_sub = tv_db[:, :L - k]
 
+                    # VRAM DIAG: log once on the very first offset of the first tile
+                    if t_idx == 0 and n_start == 0 and offset == offsets[0]:
+                        _log.info(
+                            "[VRAM-DIAG] before xor  q_sub=%s t_sub=%s  %s",
+                            tuple(q_sub.shape), tuple(t_sub.shape), self._vram_mb(device),
+                        )
+
                     # (Q, 1, L') ^ (1, N_tile, L') -> (Q, N_tile, L')
                     xor  = q_sub.unsqueeze(1) ^ t_sub.unsqueeze(0)
                     pop  = self._popcount64(xor)                          # (Q, N_tile, L') int64
@@ -468,6 +495,10 @@ class ChromaprintEngine:
                     best[:, n_start:n_end] = torch.maximum(
                         best[:, n_start:n_end], this_sim
                     )
+
+                    # VRAM DIAG: log peak within this offset (after all temps are live)
+                    if t_idx == 0 and n_start == 0 and offset == offsets[0]:
+                        _log.info("[VRAM-DIAG] peak within offset  %s", self._vram_mb(device))
 
                     del xor, pop, ov, ov_f, diff_bits, total_steps, total_bits, this_sim
 

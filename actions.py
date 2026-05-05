@@ -132,6 +132,7 @@ def _start_clap_scan(
         loading.setWindowTitle("Music Duplicate Finder")
         loading.setWindowModality(Qt.WindowModality.ApplicationModal)
         loading.setMinimumDuration(0)
+        loading.setMinimumWidth(530)
         loading.setCancelButton(None)
         loading.show()
         QApplication.processEvents()
@@ -290,6 +291,7 @@ def _start_chromaprint_scan(
         loading.setWindowTitle("Music Duplicate Finder")
         loading.setWindowModality(Qt.WindowModality.ApplicationModal)
         loading.setMinimumDuration(0)
+        loading.setMinimumWidth(530)
         loading.setCancelButton(None)
         loading.show()
         QApplication.processEvents()
@@ -357,6 +359,7 @@ class LoadResultsAction(BaseAction):
         progress.setWindowTitle("Music Duplicate Finder")
         progress.setWindowModality(Qt.WindowModality.ApplicationModal)
         progress.setMinimumDuration(0)
+        progress.setMinimumWidth(530)
         progress.setCancelButton(None)
         progress.show()
         QApplication.processEvents()  # force paint before thread starts

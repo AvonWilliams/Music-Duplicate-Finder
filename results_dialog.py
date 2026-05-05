@@ -41,6 +41,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from .fingerprint_graph import FingerprintGraphWidget
 from .results_io import save_result
 
 if TYPE_CHECKING:
@@ -216,6 +217,7 @@ class FileRow(QWidget):
         is_best: bool,
         player: QMediaPlayer,
         all_players: list,   # list of MiniPlayer instances for deactivation
+        best_fq: "FileQuality | None" = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -239,42 +241,42 @@ class FileRow(QWidget):
         layout.setSpacing(8)
         root.addWidget(self._content)
 
-        # ── Checkbox ──────────────────────────────────────────────────────
+        # ── LEFT COLUMN: checkbox + mini player stacked ───────────────────
         self._checkbox = QCheckBox()
         self._checkbox.setToolTip("Select for batch move / delete")
         self._checkbox.setStyleSheet(
-            "QCheckBox::indicator { width: 20px; height: 20px; }"
-            "QCheckBox { padding: 20px; }"
+            "QCheckBox::indicator { width: 26px; height: 26px; }"
+            "QCheckBox { padding: 8px; }"
         )
-        layout.addWidget(self._checkbox)
 
-        # ── Badges ────────────────────────────────────────────────────────
-        badge_col = QVBoxLayout()
-        badge_col.setSpacing(2)
+        self._mini = MiniPlayer(fq.path, player)
+        all_players.append(self._mini)
+
+        left_col = QVBoxLayout()
+        left_col.setSpacing(4)
+        left_col.setContentsMargins(0, 0, 0, 0)
+        left_col.addWidget(self._checkbox, alignment=Qt.AlignmentFlag.AlignHCenter)
+        left_col.addWidget(self._mini)
+        left_col.addStretch()
+        left_w = QWidget()
+        left_w.setLayout(left_col)
+        left_w.setFixedWidth(200)
+        layout.addWidget(left_w)
+
+        # ── MIDDLE COLUMN: badges + quality score + action buttons ────────
+        btn_col = QVBoxLayout()
+        btn_col.setSpacing(3)
+
         if is_best:
             best_lbl = QLabel("BEST")
             best_lbl.setStyleSheet(BEST_STYLE)
             best_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            badge_col.addWidget(best_lbl)
+            btn_col.addWidget(best_lbl)
         if fq.is_live:
             live_lbl = QLabel("LIVE")
             live_lbl.setStyleSheet(LIVE_STYLE)
             live_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            badge_col.addWidget(live_lbl)
-        badge_col.addStretch()
-        badge_w = QWidget()
-        badge_w.setLayout(badge_col)
-        badge_w.setFixedWidth(56)
-        layout.addWidget(badge_w)
-
-        # ── Mini player ────────────────────────────────────────────────────
-        self._mini = MiniPlayer(fq.path, player)
-        all_players.append(self._mini)
-        layout.addWidget(self._mini)
-
-        # ── Quality score + action buttons ────────────────────────────────────
-        btn_col = QVBoxLayout()
-        btn_col.setSpacing(3)
+            btn_col.addWidget(live_lbl)
 
         score_lbl = QLabel(f"{fq.score:.1f}")
         score_lbl.setStyleSheet("font-size: 15px; font-weight: bold; color: #333;")
@@ -322,11 +324,13 @@ class FileRow(QWidget):
         btn_w.setFixedWidth(82)
         layout.addWidget(btn_w)
 
-        # ── File info ──────────────────────────────────────────────────────
+        # ── RIGHT COLUMN: track info (top ~33%) + graph (bottom ~66%) ─────
+        filename = os.path.basename(fq.path)
+
         info_col = QVBoxLayout()
         info_col.setSpacing(1)
+        info_col.setContentsMargins(0, 0, 0, 0)
 
-        filename = os.path.basename(fq.path)
         name_lbl = QLabel(f"<b>{filename}</b>")
         name_lbl.setStyleSheet("color: #111;")
         name_lbl.setToolTip(fq.path)
@@ -356,6 +360,10 @@ class FileRow(QWidget):
             meta_lbl.setStyleSheet("color: #333; font-size: 11px;")
             info_col.addWidget(meta_lbl)
 
+        size_lbl = QLabel(f"{fq.file_size_mb:.1f} MB")
+        size_lbl.setStyleSheet("color: #222; font-size: 12px; font-weight: bold;")
+        info_col.addWidget(size_lbl)
+
         detail_parts = []
         if fq.format_name:
             detail_parts.append(fq.format_name)
@@ -363,7 +371,6 @@ class FileRow(QWidget):
             detail_parts.append(f"{fq.bitrate_kbps:.0f} kbps")
         if fq.sample_rate_hz:
             detail_parts.append(f"{fq.sample_rate_hz // 1000} kHz")
-        detail_parts.append(f"{fq.file_size_mb:.1f} MB")
         if fq.duration_sec:
             detail_parts.append(fq.duration_str)
 
@@ -371,13 +378,23 @@ class FileRow(QWidget):
         detail_lbl.setStyleSheet("color: #555; font-size: 10px;")
         info_col.addWidget(detail_lbl)
 
-        info_col.addStretch()
-
         info_w = QWidget()
         info_w.setLayout(info_col)
-        info_w.setMaximumWidth(620)
         info_w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        layout.addWidget(info_w, stretch=1)
+
+        fp_ref  = best_fq.fingerprint  if best_fq else ""
+        ref_dur = best_fq.duration_sec if best_fq else 0.0
+        graph = FingerprintGraphWidget(fp_ref, fq.fingerprint, is_best, ref_duration=ref_dur)
+
+        right_col = QVBoxLayout()
+        right_col.setSpacing(4)
+        right_col.setContentsMargins(0, 0, 0, 0)
+        right_col.addWidget(info_w, stretch=1)
+        right_col.addWidget(graph, stretch=2)
+        right_w = QWidget()
+        right_w.setLayout(right_col)
+        right_w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        layout.addWidget(right_w, stretch=1)
 
         if is_best:
             pal = self._content.palette()
@@ -502,6 +519,8 @@ class FileRow(QWidget):
 class GroupCard(QFrame):
     """Displays one duplicate group with all its file rows."""
 
+    dismissed = pyqtSignal()
+
     def __init__(
         self,
         group: "DuplicateGroup",
@@ -521,8 +540,10 @@ class GroupCard(QFrame):
         )
         best = group.best
 
+        lo, hi = group.min_similarity * 100, group.max_similarity * 100
+        sim_str = f"{lo:.1f}% – {hi:.1f}%" if abs(hi - lo) >= 0.05 else f"{hi:.1f}%"
         title = f"  {icon}  GROUP {index}   —   {group.confidence.upper()}   " \
-                f"({group.similarity * 100:.1f}% similarity)"
+                f"({sim_str} similarity)"
         if best and best.title:
             title += f"   |   \"{best.title}\""
             if best.artist:
@@ -539,25 +560,48 @@ class GroupCard(QFrame):
         outer.setContentsMargins(0, 0, 0, 0)
 
         # Title bar — visibly inside the card border
-        header = QLabel(title)
-        header.setStyleSheet(
-            f"QLabel {{ color: #111; font-weight: bold; font-size: 12px; "
-            f"background: {header_bg}; padding: 5px 10px; "
+        header_w = QWidget()
+        header_w.setObjectName("GroupHeader")
+        header_w.setStyleSheet(
+            f"QWidget#GroupHeader {{ background: {header_bg}; "
             f"border-bottom: 1px solid {color}; }}"
         )
-        header.setWordWrap(True)
-        header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        outer.addWidget(header)
+        header_layout = QHBoxLayout(header_w)
+        header_layout.setContentsMargins(0, 0, 8, 0)
+        header_layout.setSpacing(6)
+
+        header_lbl = QLabel(title)
+        header_lbl.setStyleSheet(
+            "QLabel { color: #111; font-weight: bold; font-size: 12px; "
+            "background: transparent; padding: 5px 10px; }"
+        )
+        header_lbl.setWordWrap(True)
+        header_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        header_layout.addWidget(header_lbl, stretch=1)
+
+        dismiss_btn = QPushButton("✕  Remove from results")
+        dismiss_btn.setStyleSheet(
+            "QPushButton { color: #888; background: transparent; border: 1px solid #ccc; "
+            "border-radius: 3px; padding: 2px 8px; font-size: 11px; } "
+            "QPushButton:hover { background: #fce8e8; color: #c00; border-color: #c00; }"
+        )
+        dismiss_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        dismiss_btn.setToolTip("Remove this group from the current results view (does not delete or ignore files)")
+        dismiss_btn.clicked.connect(self.dismissed.emit)
+        header_layout.addWidget(dismiss_btn)
+
+        outer.addWidget(header_w)
 
         body = QWidget()
         layout = QVBoxLayout(body)
         layout.setSpacing(2)
         layout.setContentsMargins(6, 6, 6, 6)
 
+        best_fq = group.files[0] if group.files else None
         self._file_rows: list[FileRow] = []
         for i, fq in enumerate(group.files):
             row = FileRow(fq, is_best=(i == 0), player=player,
-                          all_players=all_players)
+                          all_players=all_players, best_fq=best_fq)
             self._file_rows.append(row)
             layout.addWidget(row)
             if i < len(group.files) - 1:
@@ -628,8 +672,8 @@ class ResultsDialog(QDialog):
         self._hide_resolved = False
 
         self.setWindowTitle("Music Duplicate Finder — Results")
-        self.setMinimumSize(820, 640)
-        self.resize(1000, 720)
+        self.setMinimumSize(1500, 1000)
+        self.resize(1440, 720)
 
         # ── Shared media player ────────────────────────────────────────────
         self._audio_out = QAudioOutput()
@@ -764,9 +808,20 @@ class ResultsDialog(QDialog):
             for row in card.file_rows():
                 self._all_file_rows.append(row)
                 row.deleted.connect(lambda: self._apply_filter(self._filter_combo.currentText()))
+            card.dismissed.connect(lambda c=card: self._remove_card(c))
             self._cards_layout.addWidget(card)
             if i % 10 == 0:
                 QApplication.processEvents()
+
+    def _remove_card(self, card: GroupCard) -> None:
+        for row in card.file_rows():
+            try:
+                self._all_file_rows.remove(row)
+            except ValueError:
+                pass
+        self._card_widgets = [(conf, c) for conf, c in self._card_widgets if c is not card]
+        card.hide()
+        card.deleteLater()
 
     def _prompt_check_deletions(self) -> None:
         reply = QMessageBox.question(

@@ -38,6 +38,12 @@ from .diag import get_logger
 
 _log = get_logger("local_inference")
 
+# Tell PyTorch's CUDA allocator to use expandable segments so it grows/shrinks
+# allocations on demand instead of grabbing large fixed blocks upfront.
+# This prevents the allocator from reserving several GB for a few hundred MB
+# of actual tensors. setdefault respects a value the user may have already set.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 # NOTE: heavy ML imports (numpy, torch, transformers, soundfile, scipy) are
 # done lazily inside methods so the plugin can load and run in remote mode
 # without any of them installed. Only load_model()/find_duplicates() will
@@ -75,10 +81,23 @@ def available_gpus() -> list[str]:
         import torch
         if not torch.cuda.is_available():
             return []
-        return [
+        names = [
             f"{i}: {torch.cuda.get_device_name(i)}"
             for i in range(torch.cuda.device_count())
         ]
+        # VRAM DIAG: log VRAM state immediately after CUDA context is created.
+        # This tells us how much memory the CUDA context itself consumes before
+        # any tensors are allocated.
+        for i in range(torch.cuda.device_count()):
+            reserved  = torch.cuda.memory_reserved(i)  / 1024**3
+            allocated = torch.cuda.memory_allocated(i) / 1024**3
+            total     = torch.cuda.get_device_properties(i).total_memory / 1024**3
+            _log.info(
+                "[VRAM-DIAG] available_gpus() — CUDA context created on cuda:%d (%s): "
+                "reserved=%.2f GB  allocated=%.2f GB  total=%.2f GB",
+                i, torch.cuda.get_device_name(i), reserved, allocated, total,
+            )
+        return names
     except Exception:  # noqa: BLE001
         return []
 
@@ -185,6 +204,17 @@ class LocalInferenceEngine:
         self._model_loaded = True
         _log.info("CLAP model loaded in %.2fs on %s", time.time() - t0, self._device)
         self._progress("CLAP model ready.")
+
+    def unload_model(self) -> None:
+        """Move model off GPU and release PyTorch's VRAM pool back to CUDA."""
+        import torch
+        if self._model is not None:
+            self._model.cpu()
+            self._model = None
+        self._model_loaded = False
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        _log.info("CLAP model unloaded from GPU")
 
     def find_duplicates(
         self,

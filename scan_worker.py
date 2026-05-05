@@ -26,8 +26,10 @@ _log = get_logger("scan_worker")
 @dataclass
 class DuplicateGroup:
     """One group of duplicate files, enriched with per-file quality data."""
-    confidence: str                                     # certain | likely | unsure
-    similarity: float                                   # 0.0 – 1.0
+    confidence:     str                                  # certain | likely | unsure
+    similarity:     float                               # max pairwise (for sorting)
+    min_similarity: float = 0.0                         # weakest pair in the group
+    max_similarity: float = 0.0                         # strongest pair in the group
     files: list[FileQuality] = field(default_factory=list)
 
     @property
@@ -292,6 +294,7 @@ class ScanWorker(QThread):
             unsure_threshold  = self._unsure,
             abort_flag        = lambda: self._abort,
         )
+        engine.unload_model()
         if self._abort:
             return
 
@@ -456,9 +459,11 @@ class ScanWorker(QThread):
                 return
             self.progress.emit(idx, n_groups, f"Analysing group {idx + 1} / {n_groups}…")
 
-            confidence = rg.get("confidence", "unsure")
-            similarity = float(rg.get("similarity", 0.0))
-            file_paths = rg.get("files", [])
+            confidence     = rg.get("confidence", "unsure")
+            similarity     = float(rg.get("similarity",     0.0))
+            min_similarity = float(rg.get("min_similarity", similarity))
+            max_similarity = float(rg.get("max_similarity", similarity))
+            file_paths     = rg.get("files", [])
 
             qualities: list[FileQuality] = []
             for p in file_paths:
@@ -466,6 +471,8 @@ class ScanWorker(QThread):
                 display_path = path_map.get(p, p) if path_map else p
                 fq = analyse_file(display_path)
                 if fq:
+                    if mode == "chromaprint":
+                        fq.fingerprint = self._cp_fingerprints.get(display_path, "")
                     qualities.append(fq)
                 else:
                     analyse_failures += 1
@@ -478,9 +485,11 @@ class ScanWorker(QThread):
             qualities.sort(key=lambda q: q.score, reverse=True)
             if len(qualities) >= 2:
                 groups.append(DuplicateGroup(
-                    confidence = confidence,
-                    similarity = similarity,
-                    files      = qualities,
+                    confidence     = confidence,
+                    similarity     = similarity,
+                    min_similarity = min_similarity,
+                    max_similarity = max_similarity,
+                    files          = qualities,
                 ))
             else:
                 dropped_too_small += 1
