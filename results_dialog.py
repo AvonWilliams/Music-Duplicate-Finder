@@ -220,6 +220,7 @@ class FileRow(QWidget):
         all_players: list,   # list of MiniPlayer instances for deactivation
         best_fq: "FileQuality | None" = None,
         group_rows: "list | None" = None,
+        align: bool = True,
         parent=None,
     ):
         super().__init__(parent)
@@ -363,7 +364,7 @@ class FileRow(QWidget):
 
         fp_ref  = best_fq.fingerprint  if best_fq else ""
         ref_dur = best_fq.duration_sec if best_fq else 0.0
-        graph = FingerprintGraphWidget(fp_ref, fq.fingerprint, is_best, ref_duration=ref_dur)
+        graph = FingerprintGraphWidget(fp_ref, fq.fingerprint, is_best, ref_duration=ref_dur, align=align)
 
         right_col = QVBoxLayout()
         right_col.setSpacing(4)
@@ -523,11 +524,13 @@ class GroupCard(QFrame):
         parent=None,
         anomaly_multiplier: float = 1.7,
         anomaly_size_mb: float = 7.5,
+        align: bool = True,
     ):
         super().__init__(parent)
         self._group = group
         self._anomaly_multiplier = anomaly_multiplier
         self._anomaly_size_mb    = anomaly_size_mb
+        self._align              = align
         icon, color, bg, header_bg = CONFIDENCE_STYLES.get(
             group.confidence, ("○", "#555", "#f5f5f5", "#e8e8e8")
         )
@@ -595,7 +598,7 @@ class GroupCard(QFrame):
         for i, fq in enumerate(group.files):
             row = FileRow(fq, is_best=(i == 0), player=player,
                           all_players=all_players, best_fq=best_fq,
-                          group_rows=self._file_rows)
+                          group_rows=self._file_rows, align=self._align)
             self._file_rows.append(row)
             layout.addWidget(row)
             if i < len(group.files) - 1:
@@ -800,6 +803,7 @@ class ResultsDialog(QDialog):
     # ── Card building ──────────────────────────────────────────────────────
 
     def _build_cards(self) -> None:
+        align = (self._result.mode == "chromaprint")
         for i, group in enumerate(self._groups, start=1):
             card = GroupCard(
                 group, i,
@@ -807,6 +811,7 @@ class ResultsDialog(QDialog):
                 all_players        = self._players,
                 anomaly_multiplier = self._anomaly_multiplier,
                 anomaly_size_mb    = self._anomaly_size_mb,
+                align              = align,
             )
             self._card_widgets.append((group.confidence, card))
             for row in card.file_rows():

@@ -64,19 +64,22 @@ def compute_similarity_curve(
     fp_other: str,
     window: int = 40,
     step: int = 8,
+    align: bool = True,
 ) -> list[float] | None:
     """
     Return per-window Hamming similarity between two chromaprint strings.
     window=40 frames ≈ 5 s, step=8 frames ≈ 1 s per data point.
     Values are 0.0 (no match) – 1.0 (perfect match).
     Returns None if either fingerprint is missing or too short.
+    align=False skips the offset search and compares at position 0 (faster,
+    suitable when the files are similar-but-not-identical, e.g. CLAP results).
     """
     a = _decode(fp_ref)
     b = _decode(fp_other)
     if a is None or b is None or len(a) < window or len(b) < window:
         return None
 
-    off = _best_offset(a, b, min(40, len(a) // 4, len(b) // 4))
+    off = _best_offset(a, b, min(40, len(a) // 4, len(b) // 4)) if align else 0
 
     if off >= 0:
         a_al, b_al = a[off:], b[:len(a) - off]
@@ -127,6 +130,7 @@ class FingerprintGraphWidget(QWidget):
         fp_other: str,
         is_best: bool,
         ref_duration: float = 0.0,
+        align: bool = True,
         parent=None,
     ):
         super().__init__(parent)
@@ -134,7 +138,7 @@ class FingerprintGraphWidget(QWidget):
         self._duration  = ref_duration
         self._curve: list[float] | None = None
         if not is_best:
-            self._curve = compute_similarity_curve(fp_ref, fp_other)
+            self._curve = compute_similarity_curve(fp_ref, fp_other, align=align)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMinimumSize(160, 80)
         self.setToolTip(

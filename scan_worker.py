@@ -23,6 +23,26 @@ if TYPE_CHECKING:
 _log = get_logger("scan_worker")
 
 
+def _find_fpcalc() -> str | None:
+    """Locate the fpcalc binary, mirroring the logic in actions.py."""
+    import os
+    import shutil
+    try:
+        from picard import config as picard_config
+        p = getattr(picard_config.setting, "acoustid_fpcalc", None) or ""
+        if p and os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+    except Exception:  # noqa: BLE001
+        pass
+    found = shutil.which("fpcalc")
+    if found:
+        return found
+    for candidate in ("/usr/bin/fpcalc", "/usr/local/bin/fpcalc"):
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
 @dataclass
 class DuplicateGroup:
     """One group of duplicate files, enriched with per-file quality data."""
@@ -504,6 +524,11 @@ class ScanWorker(QThread):
         order = {"certain": 0, "likely": 1, "unsure": 2}
         groups.sort(key=lambda g: (order.get(g.confidence, 9), -g.similarity))
 
+        # For CLAP results, compute chromaprint fingerprints so the graph widget
+        # can show a zero-offset similarity curve alongside the CLAP grouping.
+        if mode != "chromaprint" and groups:
+            self._add_clap_fingerprints(groups)
+
         _log.info(
             "Finalise complete: %d → %d groups after filtering  "
             "(analyse_failures=%d, groups_dropped_lt_2_files=%d)",
@@ -518,3 +543,56 @@ class ScanWorker(QThread):
             elapsed_seconds     = elapsed,
             mode                = mode,
         ))
+
+    def _add_clap_fingerprints(self, groups: list) -> None:
+        """
+        Run fpcalc on every file in CLAP result groups and store the raw
+        chromaprint in fq.fingerprint so the graph widget can render a
+        zero-offset similarity curve.  Silent no-op if fpcalc is not found.
+        """
+        import json
+        import os
+        import subprocess
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        fpcalc = _find_fpcalc()
+        if not fpcalc:
+            _log.info("_add_clap_fingerprints: fpcalc not found — graph data unavailable")
+            return
+
+        # Collect unique FileQuality objects that made it into groups
+        seen: dict[str, FileQuality] = {}
+        for group in groups:
+            for fq in group.files:
+                if fq.path not in seen:
+                    seen[fq.path] = fq
+
+        total = len(seen)
+        _log.info("_add_clap_fingerprints: %d unique files, fpcalc=%s", total, fpcalc)
+        self.progress.emit(0, total, f"Computing fingerprints for graph ({total} files)…")
+
+        def _run_one(path: str):
+            try:
+                out = subprocess.run(
+                    [fpcalc, "-json", path],
+                    capture_output=True, text=True, timeout=120,
+                )
+                if out.returncode == 0:
+                    data = json.loads(out.stdout)
+                    return path, data.get("fingerprint") or ""
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("fpcalc failed for %r: %s", path, exc)
+            return path, ""
+
+        done = 0
+        workers = max(1, os.cpu_count() or 4)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            fts = {pool.submit(_run_one, p): p for p in seen}
+            for ft in as_completed(fts):
+                if self._abort:
+                    break
+                path, fp = ft.result()
+                done += 1
+                if fp:
+                    seen[path].fingerprint = fp
+                self.progress.emit(done, total, f"Fingerprinting for graph… {done}/{total}")
