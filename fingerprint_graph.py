@@ -116,10 +116,10 @@ def _sim_color(v: float, alpha: int = 180) -> QColor:
 class FingerprintGraphWidget(QWidget):
     """Painted line graph showing per-window similarity over track time."""
 
-    _PL = 28    # left padding  — Y-axis labels ("100%", "0%")
+    _PL = 32    # left padding  — Y-axis labels
     _PR = 4     # right padding
     _PT = 4     # top padding
-    _PB = 13    # bottom padding — X-axis labels ("0:00", duration)
+    _PB = 16    # bottom padding — X-axis labels
 
     def __init__(
         self,
@@ -170,20 +170,23 @@ class FingerprintGraphWidget(QWidget):
         gh = H - pt - pb     # graph area height
         n  = len(self._curve)
 
-        # ── Axis labels ───────────────────────────────────────────────────
+        # ── Axis labels + guide lines ─────────────────────────────────────
         lbl_font = QFont("sans-serif", 7)
         p.setFont(lbl_font)
+
+        # Y-axis: labels at 100%/75%/50%/25%/0%, horizontal guides for middle three
+        for pct, label in [(1.0, "100%"), (0.75, "75%"), (0.5, "50%"), (0.25, "25%"), (0.0, "0%")]:
+            yg = gy + int(gh * (1.0 - pct))
+            p.setPen(QColor("#777"))
+            p.drawText(0, yg - 6, pl - 3, 12,
+                       Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                       label)
+            if 0.0 < pct < 1.0:
+                p.setPen(QPen(QColor("#e0e0e0"), 1))
+                p.drawLine(gx, yg, gx + gw, yg)
+
+        # X-axis: "0:00" left, duration right, time splits at 25%/50%/75%
         p.setPen(QColor("#777"))
-
-        # Y-axis: "100%" top, "0%" bottom — right-aligned into left margin
-        p.drawText(0, gy - 2, pl - 3, 12,
-                   Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                   "100%")
-        p.drawText(0, gy + gh - 10, pl - 3, 12,
-                   Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                   "0%")
-
-        # X-axis: "0:00" left, duration right — inside bottom margin
         p.drawText(gx, H - pb + 1, 28, pb - 1,
                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                    "0:00")
@@ -192,16 +195,21 @@ class FingerprintGraphWidget(QWidget):
             p.drawText(gx + gw - 28, H - pb + 1, 28, pb - 1,
                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                        f"{m}:{s:02d}")
+            for frac in (0.25, 0.5, 0.75):
+                t = int(self._duration * frac)
+                xm = gx + int(gw * frac)
+                mm, ss = divmod(t, 60)
+                p.setPen(QPen(QColor("#e8e8e8"), 1))
+                p.drawLine(xm, gy, xm, gy + gh)
+                p.setPen(QColor("#777"))
+                p.drawText(xm - 14, H - pb + 1, 28, pb - 1,
+                           Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter,
+                           f"{mm}:{ss:02d}")
 
         # ── Axis lines ────────────────────────────────────────────────────
         p.setPen(QPen(QColor("#bbb"), 1))
         p.drawLine(gx, gy, gx, gy + gh)
         p.drawLine(gx, gy + gh, gx + gw, gy + gh)
-
-        # ── 80% guide line ────────────────────────────────────────────────
-        p.setPen(QPen(QColor("#e0e0e0"), 1))
-        y80 = gy + int(gh * 0.20)
-        p.drawLine(gx, y80, gx + gw, y80)
 
         # ── Point positions ───────────────────────────────────────────────
         pts = [

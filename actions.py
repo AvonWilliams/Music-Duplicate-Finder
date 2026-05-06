@@ -29,7 +29,7 @@ from .scan_worker import ScanResult, ScanWorker
 # ══════════════════════════════════════════════════════════════════════════
 
 class _FingerprintWorker(QThread):
-    progress = pyqtSignal(int, int)   # completed, total
+    progress = pyqtSignal(int, int, str)   # completed, total, current_path
     done_sig = pyqtSignal()           # fires when finished (no data — read self.results)
 
     def __init__(self, paths: list, fpcalc_bin: str):
@@ -85,7 +85,7 @@ class _FingerprintWorker(QThread):
                 done += 1
                 if fp:
                     self.results[path] = fp
-                self.progress.emit(done, total)
+                self.progress.emit(done, total, path)
 
         _log.info("[fpcalc-worker] done: %d/%d succeeded", len(self.results), total)
         self.done_sig.emit()
@@ -144,10 +144,16 @@ def _run_parallel_fingerprint(paths: list, tagger, window) -> bool:
     dlg.setWindowTitle("Fast Fingerprint — Parallel")
     dlg.setWindowModality(Qt.WindowModality.WindowModal)
     dlg.setMinimumDuration(0)
+    dlg.setMinimumWidth(600)
     dlg.setValue(0)
 
     worker = _FingerprintWorker(paths, fpcalc)
-    worker.progress.connect(lambda done, _total: dlg.setValue(done))
+
+    def _on_fp_progress(done: int, _total: int, path: str) -> None:
+        dlg.setValue(done)
+        dlg.setLabelText(f"Computing fingerprints…\n{os.path.basename(path)}")
+
+    worker.progress.connect(_on_fp_progress)
     worker.done_sig.connect(dlg.accept)
     dlg.canceled.connect(worker.abort)
     worker.start()
